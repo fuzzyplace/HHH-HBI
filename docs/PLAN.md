@@ -3,47 +3,39 @@
 ## Goal
 Muse 2 → real-time cyberpunk visuals + reactive audio. User meditates art into existence on a persistent canvas; capture snapshots.
 
-## Muse 2 inputs → mappings
-| Input | Derived | Visual | Audio |
+## Muse 2 inputs → mappings (v0.4)
+What each signal is and how far to trust it: `docs/SIGNALS.md`. Primary drivers are the two indices plus the instant events; bands are secondary texture.
+
+| Input | Derived (src/dsp/pipeline.js) | Visual (gpu.js) | Audio (synth.js) |
 |---|---|---|---|
-| EEG delta 1–4Hz | rel. power | deep violet nebula glow, radius | sub drone A1 (55Hz) sine |
-| EEG theta 4–8Hz | rel. power | magenta flowing ribbons | triangle 165Hz, slow filter sweep |
-| EEG alpha 8–13Hz | rel. power | cyan concentric rings (calm) | sine pair 220/330Hz, reverb send up |
-| EEG beta 13–30Hz | rel. power | amber glitch/scanlines | filtered saw 440Hz, cutoff ↑ |
-| EEG gamma 30–44Hz | rel. power | white spark particles | high sine 880Hz w/ tremolo |
-| 4 channels TP9/AF7/AF8/TP10 | per-ch dominant band | four lobe nodes, hue = dominant band | L/R pan from left–right asymmetry |
-| PPG | BPM + beats | ring pulse on beat | soft kick on beat |
-| Accelerometer | head tilt | parallax offset of field | filter tilt |
-| Gyroscope | angular rate | field rotation | — |
-| Blink (AF7/AF8 p2p > max(150µV, 1.6× baseline)) / jaw clench (TP9+TP10 30–44Hz power > 4× clean baseline) | event (800ms refractory) | chromatic flash + glitch | noise burst |
+| **relax** = α − (β+γ) dB, ear pair, ~2s smoothing | 0..1 (calibrated: open≈0.2, closed≈0.9) | palette mood cyan/violet↔amber/magenta; drag 0.95+0.045·r; trail decay (0.84+0.14·r)^f60 | reverb wet +0.15·r, delta drone −0.04·r |
+| **focus** = β − θ dB, forehead pair | 0..1 (calibrated: closed≈0, open≈0.5) | turbulence 0.5+2.6·f; glitch min(0.9, 0.5·f+flash·0.7); RGB shift +0.004·f; bloom 0.5+0.9·f | beta filter cutoff +600Hz·f |
+| **PPG beat** | event + BPM | forward dolly (cam z 6→4.7), feedback-zoom surge +0.025, radial pulse 1.1, capped brightness swell ×1.32; ~0.4s decay | lub-dub thump: 58→45Hz triangle body + 200Hz-lowpassed knock, second hit 0.55× at +120ms |
+| **Head tilt** (accel) | tilt x/y, smoothed | paint emitter aim (tilt·2.3), camera x 1.2·tilt | beta filter tilt |
+| Gyroscope | angular rate | subtle field rotation | — |
+| Blink (AF7/AF8 p2p > max(150µV, 1.6× baseline)) | event, 800ms refractory; pauses forehead pair 1s | cyan flash + RGB spike + glitch burst | band-passed noise burst (5ms ramp) |
+| Jaw clench (TP9/TP10 30–44Hz > 4× clean baseline) | event, 800ms refractory; pauses all channels 1s | same as blink | same as blink |
+| delta / theta / gamma | smoothed rel. power, wide-span scaling | size 0.02+0.02·δ, zoom drift +0.004·δ; noise freq/smear ·θ; data-rain 0.05+0.2·γ | drone voices (small) |
+| 4 channels | per-ch dominant band | attractor strengths 0.15+0.5·m | — |
 | Battery | % | HUD | — |
-Canvas uses alpha trails so the piece accumulates; Snapshot = PNG download.
 
-### Signal pipeline (v0.3, `src/dsp/pipeline.js`)
-- All signal math behind `SignalPipeline`: `push/pushPpg/pushMotion` in, `tick()` @10Hz out (one reused result object).
-- Quality per channel: σ (<1.5µV no contact, score falls 60→150µV), 50/60Hz line-noise ratio, railing (≥5% samples at ±990µV). Labels good / noisy / no contact / railed; no-contact & railed channels are left out of the averages.
-- Artifact rejection: blink, clench, or motion (gyro >45°/s, accel jump >0.25g) holds band outputs for 1s (one FFT window).
-- Normalization: adaptive min/max until calibrated; after a 30s eyes-closed baseline (clean seconds only), bands map as `0.5 + z/5` (±2.5σ → 0..1) with a ~3-min drift of the baseline mean. Baseline stored in localStorage (`hbi.calibration.v1`, band stats only).
+Calibration cues: one soft tone at step 1→2, two rising tones at the end (audio on).
 
-## Visual stack (v0.2)
-three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles (262k WebGPU / 65k WebGL) in curl-ish noise flow + 4 electrode attractors → ping-pong feedback buffer (painting memory, max-blend, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. EEG-driven data-rain glyph layer. Hydra-synth glitch mode (G). Adaptive resolution when frames >24ms.
+### Signal pipeline (v0.4, `src/dsp/pipeline.js`)
+- `push/pushPpg/pushMotion` in, `tick()` @10Hz out (one reused result object, incl. `relax`, `focus`, `relaxDb`, `focusDb`, `dB`, `psd`, `held`).
+- Quality: σ, 50/60Hz ratio, railing → good / noisy / no contact / railed; unusable channels excluded.
+- Band power tracked in dB, smoothed τ≈2s; outputs eased τ≈0.8s. No auto-stretch: pre-calibration indices use fixed spans (relax 8dB, focus 6dB) around a 60s-slow centre.
+- Two-step calibration (10s eyes open + 10s eyes closed, clean seconds, 2s settle each) anchors the indices; reports eyes-closed alpha gain (≥3dB strong). Stored as `hbi.calibration.v2`.
+- Signal Lab (L): spectrum, 30s index history with artifact markers, per-channel quality.
 
-| Input | GPU visual |
-|---|---|
-| delta | particle size, feedback zoom |
-| theta | noise frequency, feedback smear |
-| alpha | damping (laminar flow), trail length, calm palette (cyan→violet) |
-| beta | turbulence, glitch row-tear, RGB split |
-| gamma | sparks/bloom strength, data-rain density |
-| 4 channels | attractor strengths at TP9/AF7/AF8/TP10 positions |
-| PPG beat | radial pressure pulse |
-| blink/clench | cyan flash + RGB spike + glitch burst |
-| accel / gyro | camera drift / field rotation |
+## Visual stack
+three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles in curl-ish noise flow, respawning at the tilt-aimed emitter + 4 electrode attractors → ping-pong feedback buffer (painting memory, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. Data-rain glyph layer. Hydra glitch mode (G) reads relax/focus. 2D fallback (scene.js) follows the same mapping in simplified form.
 
 ## Phases
 1. **Scaffold (done)**  — Vite app, simulated source, band DSP, canvas scene, synth, snapshot, HUD.
 2. **Hardware (code done, awaiting real-headband test — see docs/HARDWARE.md)** — chooser/timeout/cancel errors, auto-reconnect w/ backoff (5 tries) without reopening chooser, SIM keeps running until Muse streams, fallback to SIM on give-up, battery, device name in HUD (ble-integrator).
-3. **Signal quality (done — real-headband tuning pending)** — artifact rejection, per-channel quality, 30s eyes-closed baseline calibration with local persistence, adaptive normalization fallback (dsp-engineer).
+3. **Signal quality (done)** — artifact rejection, per-channel quality.
+3b. **Signal truth (done — awaiting real-headband check)** — dB smoothing, relax/focus indices, two-step calibration, Signal Lab (L), docs/SIGNALS.md, heartbeat motion + thump.
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, binaural option, granular textures, generative melody from alpha/theta (audio-designer).
 6. **Polish & share** — snapshot gallery, session export (JSON + PNG), install as PWA, H.H.H. branding (qa-reviewer + all).
@@ -59,5 +51,6 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 - Web app via Chrome Web Bluetooth (not native/Electron), deployed as a static site on Vercel. Fallback later: Mind Monitor OSC bridge.
 - Muse 2 only (not Muse S / Athena).
 - Plain JS, no framework, Canvas2D first; WebGL in phase 4.
-- Calibration is a single eyes-closed rest baseline (not eyes-open + eyes-closed). Thresholds are tuned on the simulator and need real-headband tuning.
+- Relax/focus spans and artifact thresholds are tuned on the (now realistic) simulator and need real-headband tuning.
+- Focus is "activation" (beta vs theta), not a measure of thinking; muscle tension moves it.
 - Local-only, no data leaves the browser.

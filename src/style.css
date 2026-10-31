@@ -25,3 +25,18 @@ button:hover{background:var(--cy);color:var(--bg)}
 .calbox p{margin:10px 0;line-height:1.5}
 .calbar{height:6px;border:1px solid var(--cy);margin:12px 0}.calbar i{display:block;height:100%;width:0;background:var(--cy);box-shadow:0 0 8px var(--cy);transition:width .2s}
 #calib.done{border-color:#00ff9c;color:#00ff9c}
+#meters{margin:4px 0 8px}
+.meter{display:flex;align-items:center;gap:8px;margin:3px 0}
+.meter span{width:44px;font-weight:bold;letter-spacing:.08em}
+.meter i{display:block;height:10px;width:0;max-width:200px;transition:width .2s}
+#m-relax{background:#00fff0;box-shadow:0 0 10px #00fff0}#m-focus{background:#ffb000;box-shadow:0 0 10px #ffb000}
+.meter b{color:inherit;text-shadow:none;letter-spacing:0;font-weight:normal;opacity:.8}
+#bars.dim .bar i{height:4px}
+.small{font-size:11px}
+#lab{position:fixed;right:12px;top:12px;padding:10px;background:rgba(5,0,15,.82);border:1px solid var(--cy);z-index:4;max-width:calc(100vw - 24px)}
+#lab[hidden]{display:none}
+.labhead{display:flex;flex-direction:column;gap:2px;margin-bottom:6px;max-width:440px}
+#lab canvas{display:block;max-width:100%}
+#lab{background:rgba(5,0,15,.94)}
+@media (max-width:1000px){#lab{top:auto;bottom:12px;left:12px;right:12px;display:flex;flex-direction:column;align-items:center}#lab canvas{width:auto!important;height:auto!important;max-width:100%;max-height:min(360px,48vh)}.labhead{align-self:stretch}}
+#lab canvas{position:static;inset:auto}
