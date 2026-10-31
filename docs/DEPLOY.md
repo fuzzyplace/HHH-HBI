@@ -3,7 +3,7 @@
 Static Vite build (`dist/`), no server. `vercel.json` sets the build, caching and security headers.
 
 **Live:** https://hhh-hbi.vercel.app (team `stdclub`, project `hhh-hbi`, Hobby plan).
-Deploy: `vercel deploy --prod` from the repo (linked via `.vercel/`, gitignored).
+Deploy: push to `main` (Git-connected). Manual fallback: `vercel deploy --prod` (linked via `.vercel/`, gitignored).
 
 ## Hosting
 - `npm ci && npm run build`; output `dist/`. Hashed `/assets/*` cached 1 year (immutable); `index.html` always revalidates.
@@ -44,6 +44,6 @@ Guard: each event ≤20 per page load, ≤150 total. Opt-out: GPC, Do Not Track,
 - Web Analytics and Speed Insights: enabled (verified via API on first deploy).
 - **Firewall**: Bot Protection = Challenge (live since 2026-10-31; browsers and verified bots pass, scripts like plain `curl` get 429). DDoS mitigation on by default. Under attack: `vercel firewall attack-mode`. Check traffic: `vercel firewall overview`.
 - **Settings → Spend Management**: set a cap/alerts (bandwidth abuse on a static site).
-- **Git**: install the Vercel GitHub App on `fuzzyplace` (github.com/apps/vercel), then `vercel git connect` → push to `main` deploys production, other branches get preview URLs.
+- **Git**: connected to `fuzzyplace/HHH-HBI` (2026-10-31). Push to `main` deploys production; other branches get preview URLs (behind Vercel login).
 - **Deployment Protection**: keep Vercel Authentication on *preview* deployments only.
 - **Observability** tab: edge request counts, 4xx/5xx, top paths, bandwidth.
