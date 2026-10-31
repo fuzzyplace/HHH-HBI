@@ -53,6 +53,11 @@ UI: one bottom-centre dock (status, steps, sensor map, band key, relax/focus, co
 - **Summary** after a session: eyes-closed vs eyes-open relax, alpha dB difference, heart rate (live seconds only).
 - **Play back (P)**: the recording drives the current view and the sound exactly as live (beats, artifacts, arm lights); replay bar shows progress with open/closed markers. Esc/P stops.
 
+## Modes (all need Live; each toggles independently)
+- **PLAY (J)** — head movement becomes an instrument instead of noise. Head orientation = gyro integrated with a 6s leak to centre (yaw assumed gyro z, pitch gyro x; 3°/s dead zone; 60° ≈ full range). INK: a stylus arm follows your head and stirs the water; blink → ink drops from the forehead nozzles (+ liquid "plink"); jaw clench → ripple from the cortex (+ low swell). Sensor ink still pauses during holds (honest data), but motion no longer glitches the arms. In **playback**, head turn scrubs time (centre 1×, right up to +4×, left rewinds up to −4×), a quick nod (>90°/s) pauses/resumes.
+- **BREATHE (B)** — the arms reach in and draw back at 5.5 breaths/min (inhale = first half). Heart rate naturally rises on the in-breath and falls on the out-breath; `src/dsp/sync.js` measures how much of your real beat-to-beat heart-rate variation (last 64s, ≥30s needed) follows the guide's rhythm (lock-in, detrended, noise floor removed, swings <1.5 bpm discounted) → **SYNC 0..1**. Sync >0.45 with a pulse lock grows **harmony** (τ 8s up, 4s down): gold trim and cortex, a gold thread of ink weaving between the sensors, and the groove resolves. Wellness feedback, not a medical measure.
+- **Music (N)** — CHORD (binaural band chord) or GROOVE (heart-locked tech house; see `src/audio/groove.js`). Remembered per browser (`hbi.music`).
+
 ## Visual stack
 three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles in curl-ish noise flow, respawning at the tilt-aimed emitter + 4 electrode attractors → ping-pong feedback buffer (painting memory, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. Data-rain glyph layer. Hydra glitch mode (G) reads relax/focus. 2D fallback (scene.js) follows the same mapping in simplified form.
 
@@ -63,6 +68,7 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 3c. **Heart + calm views (done — awaiting real-headband check)** — PPG on all 3 channels (was ambient-only), autocorrelation heart tracker + beat clock pacing everything, audible thump, SPRAY + ORBS views.
 3d. **INK + binaural (done — awaiting real-headband check)** — readiness gate, fluid ink view with cyborg injector arms, binaural band chord on by default + mute, bottom dock, beat-only motion everywhere.
 3e. **Sessions + depth (done — awaiting real-headband check)** — guided open/closed session with countdown tones, recording + playback + export, INK colour/depth, PAINT impasto.
+3f. **Play + groove + breathe (done — awaiting real-headband check)** — PLAY mode (head stirs / scrubs), artifacts as instruments, heart-locked GROOVE, BREATHE with heart-rhythm sync and gold harmony.
 3b. **Signal truth (done)** — dB smoothing, relax/focus indices, two-step calibration, Signal Lab (L), docs/SIGNALS.md, heartbeat motion + thump.
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, granular textures, generative melody from alpha/theta (audio-designer).

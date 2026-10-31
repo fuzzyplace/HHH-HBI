@@ -72,7 +72,7 @@ window.hbiDiag = () => {
     relax: r1(sig.relax), focus: r1(sig.focus), relaxDb: r1(sig.relaxDb), focusDb: r1(sig.focusDb),
     bandDb: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.dB[k])])),
     bands: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.bands[k])])),
-    bpm: Math.round(sig.bpm), heartLock: r1(sig.beatConf), heartSource: sig.heartSource,
+    bpm: Math.round(sig.bpm), heartLock: r1(sig.beatConf), heartSource: sig.heartSource, modes: { play: state.play, breath: state.breath.on, music: state.music }, sync: r1(state.sync), harmony: r1(state.harmony), head: { x: r1(state.head.x), y: r1(state.head.y) },
     calibration: sig.calibration.state, calibrationResult: sig.calibration.result, artifactNow: { ...sig.artifact }, held: [...sig.held],
   };
   console.log(JSON.stringify(out, null, 2));

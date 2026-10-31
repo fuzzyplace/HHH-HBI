@@ -97,4 +97,12 @@ INK is **monitoring first, art second**: every mark on screen comes from a real 
 
 Alpha (8–13Hz, cyan) is the most reliable thing a Muse shows: it usually rises when you close your eyes and relax. A session (R) makes that visible: 30s eyes open, a few minutes eyes closed, 30s eyes open again, guided by tones so you never need to look. Afterwards the summary compares the eyes-closed part with the eyes-open parts, and **Play back (P)** replays the whole thing — the ink, the arms, the heartbeat and the sound — so you can watch what your brain did while your eyes were closed. Sessions stay in this browser unless you press Export.
 
+## Breathe with the machine (B)
+
+Your heart doesn't beat like a metronome: it speeds up slightly as you breathe in and slows as you breathe out. Breathing slowly — about 5.5 breaths a minute — makes that swing big and regular. In BREATHE mode the arms breathe at that pace; HBI times each real heartbeat from the PPG sensor and measures how much your heart rate rises and falls *with the machine's breath* (SYNC). Keep a steady pulse lock and breathe with the arms for half a minute or more; when SYNC holds, the machine blooms gold. It's a way to feel heart and breath settle into one rhythm — feedback for relaxation, not a health measurement.
+
+## Play (J)
+
+Normally head movement, blinks and jaw clenches are *artifacts*: they corrupt the EEG, so HBI pauses that sensor's ink and the arm glitches. In PLAY mode they become instruments: your head steers a stirring arm, blinks drop ink, clenches send ripples. The brain-signal ink still pauses during the artifact — the movement plays the art, it doesn't pretend to be brain data.
+
 Full mapping table: `docs/PLAN.md`.
