@@ -13,28 +13,37 @@ catch (e) { console.warn('GPU scene failed, 2D fallback', e); scene = new Scene(
 window.hbi = scene;
 const flashFn = () => scene.flash || 0;
 
-// Views: PAINT (feedback particles on #c), SPRAY and ORBS (calm 3D, own canvases, created on first use)
-const VIEWS = ['spray', 'orbs', 'paint'];
-const VIEW_CANVAS = { paint: 'c', spray: 'cspray', orbs: 'corbs' };
+// Views: INK (fluid + injector arms, two canvases), SPRAY and ORBS (calm 3D), PAINT (feedback particles on #c)
+const VIEWS = ['ink', 'spray', 'orbs', 'paint'];
+const VIEW_CANVAS = { ink: ['cink', 'carms'], spray: ['cspray'], orbs: ['corbs'], paint: ['c'] };
+const LOADERS = {
+  ink: async () => new (await import('./visuals/ink.js')).InkView($('cink'), $('carms')),
+  spray: async () => new (await import('./visuals/spray.js')).SprayView($('cspray')),
+  orbs: async () => new (await import('./visuals/orbs.js')).OrbsView($('corbs')),
+};
 const views = { paint: scene };
 let view = 'paint', cur = scene;
 async function setView(v) {
   if (!views[v]) {
-    try {
-      const mod = v === 'spray' ? await import('./visuals/spray.js') : await import('./visuals/orbs.js');
-      views[v] = new (v === 'spray' ? mod.SprayView : mod.OrbsView)($(VIEW_CANVAS[v]));
-    } catch (e) { console.warn(e); msg(`${v} view unavailable: ${e.message}`); return; }
+    try { views[v] = await LOADERS[v](); }
+    catch (e) {
+      console.warn(e); msg(`${v.toUpperCase()} view unavailable: ${e.message}`);
+      if (v === 'ink' && view === 'paint' && !views.spray) return setView('spray');   // first load without WebGL2
+      return;
+    }
   }
   if (v !== 'paint' && hydra?.on) { hydra.toggle(); $('mode').textContent = 'Glitch (G)'; }
   view = v; cur = views[v];
-  for (const k of VIEWS) $(VIEW_CANVAS[k]).hidden = k !== v;
+  for (const k of VIEWS) for (const id of VIEW_CANVAS[k]) $(id).hidden = k !== v;
   cur.resize?.();
   $('view').textContent = `View: ${v.toUpperCase()} (V)`;
+  $('mode').hidden = v !== 'paint';
   try { localStorage.setItem('hbi.view', v); } catch {}
 }
 const nextView = () => setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
 window.hbiViews = () => ({ view, cur, views, state });   // console/debug handle (no signal data beyond the state object)
 const synth = new Synth();
+window.hbiSynth = synth;
 const pipe = new SignalPipeline();
 const CAL_KEY = 'hbi.calibration.v2';   // local-only: eyes-open/closed index levels (dB) + timestamp, no device IDs
 try { localStorage.removeItem('hbi.calibration.v1'); } catch {}   // v1 (single-state z-score) no longer applies
@@ -47,14 +56,15 @@ const r1 = v => Math.round(v * 100) / 100;
 window.hbiDiag = () => {
   if (!sig) return null;
   const out = {
-    source: $('status').textContent, secondsSinceSwap: Math.round((performance.now() - diag.since) / 1000),
+    source: $('status').textContent, ready: state.ready, secondsSinceSwap: Math.round((performance.now() - diag.since) / 1000),
     events: { blink: diag.blink || 0, clench: diag.clench || 0, beat: diag.beat || 0 },
     rejectedPct: diag.ticks ? Math.round((100 * diag.rejected) / diag.ticks) : 0,
     quality: Object.fromEntries(CH.map((n, i) => [n, { label: sig.quality[i].label, std: r1(sig.quality[i].std), score: r1(sig.quality[i].score) }])),
     relax: r1(sig.relax), focus: r1(sig.focus), relaxDb: r1(sig.relaxDb), focusDb: r1(sig.focusDb),
     bandDb: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.dB[k])])),
     bands: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.bands[k])])),
-    bpm: Math.round(sig.bpm), calibration: sig.calibration.state, calibrationResult: sig.calibration.result, artifactNow: { ...sig.artifact }, held: [...sig.held],
+    bpm: Math.round(sig.bpm), heartLock: r1(sig.beatConf), heartSource: sig.heartSource,
+    calibration: sig.calibration.state, calibrationResult: sig.calibration.result, artifactNow: { ...sig.artifact }, held: [...sig.held],
   };
   console.log(JSON.stringify(out, null, 2));
   return out;
@@ -62,26 +72,29 @@ window.hbiDiag = () => {
 let calWas = pipe.calibrated ? 'done' : 'none';   // calibration UI state: none | running | done
 const rate = { eeg: 0, ppg: 0, imu: 0 };   // samples/sec counters for stream health
 const CH = ['TP9', 'AF7', 'AF8', 'TP10'];
-const COLORS = { delta: '#8a4dff', theta: '#ff2bd6', alpha: '#00fff0', beta: '#ffb000', gamma: '#ffffff' };
 
 const state = {
+  // readiness gate: nothing moves, paints or sounds until 'live' (streaming + contact + calibrated this session)
+  ready: 'idle',
   bands: Object.fromEntries(BAND_NAMES.map(k => [k, 0])),
   ch: Array.from({ length: 4 }, () => Object.fromEntries(BAND_NAMES.map(k => [k, 0]))),
+  quality: Array.from({ length: 4 }, () => ({ label: 'off', score: 0 })),
+  held: [false, false, false, false], motion: false,   // artifact holds per channel; motion glitches every injector
   relax: 0.5, focus: 0.5,   // primary drivers (0..1): calm vs activation — see docs/SIGNALS.md
-  beatPhase: 0, beatConf: 0, // heart clock: 0..1 through the current beat, lock confidence — the heartbeat paces every view
-  asym: 0, bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
+  beatPhase: 0, beatConf: 0, // heart clock: 0..1 through the current beat, lock confidence — only real beats move anything
+  bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
 };
 
-// HUD bars
-$('bars').innerHTML = BAND_NAMES.map(k => `<div class="bar"><span>${k}</span><i id="b-${k}" style="color:${COLORS[k]};background:${COLORS[k]};width:0"></i></div>`).join('');
 const msg = t => ($('msg').textContent = t);
 
 let source = null;
-const setStatus = label => ($('status').textContent = label + (scene?.webgpu ? ' · WebGPU' : scene?.renderer ? ' · WebGL2' : ''));
+let lastEeg = 0, motionUntil = 0;
+let sessionCal = false;   // calibrated (or saved baseline confirmed) since this source started
+const setStatus = label => ($('status').textContent = label);
 // handlers ignore events from any source that isn't the live one (e.g. a Muse still connecting while SIM runs)
 function wire(src) {
   const live = fn => d => { if (source === src) fn(d); };
-  src.on('eeg', live(({ ch, samples }) => { pipe.push(ch, samples); if (ch === 0) rate.eeg += samples.length; }));
+  src.on('eeg', live(({ ch, samples }) => { pipe.push(ch, samples); if (ch === 0) { rate.eeg += samples.length; lastEeg = performance.now(); } }));
   src.on('ppg', live(({ ch, samples }) => { pipe.pushPpg(ch, samples); if (ch === 1) rate.ppg += samples.length; }));   // all 3 channels: 0 is ambient light, the pulse is on 1/2
   src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
   src.on('gyro', live(g => { pipe.pushMotion('gyro', g); state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
@@ -98,7 +111,9 @@ function swapTo(src, label) {
   Object.assign(diag, { since: performance.now(), ticks: 0, rejected: 0, blink: 0, clench: 0, beat: 0 });
   pipe.reset();   // re-learn adaptive ranges per source; calibration is kept, a running one is stopped
   if (calWas === 'running') settleCalibration(`Calibration stopped — switched to ${label}`);
+  sessionCal = false; lastEeg = 0;   // every new source re-syncs: contact check + calibration before anything moves
   state.battery = null; $('batt').textContent = '🔋 --';
+  $('simbtns').hidden = label !== 'SIM';
   setStatus(label);
 }
 function useSim() { const s = (window.sim = new SimulatedSource()); wire(s); swapTo(s, 'SIM'); s.start(); }
@@ -111,12 +126,31 @@ $('connect').onclick = async () => {
   try {
     const { MuseSource } = await import('./input/muse.js');
     const m = new MuseSource(); wire(m);
-    await m.start();                      // SIM keeps painting until the headset is actually streaming
-    window.sim = null; swapTo(m, 'MUSE 2'); msg(`${m.deviceName || 'Muse 2'} connected`);
+    await m.start();                      // SIM keeps streaming until the headset is actually streaming
+    window.sim = null; swapTo(m, 'MUSE 2'); msg(`${m.deviceName || 'Muse 2'} connected — check the sensor map, then calibrate`);
   } catch (e) { msg('Connect failed: ' + e.message + ' — staying on SIM'); }
   finally { connecting = false; $('connect').disabled = false; }
 };
-$('audio').onclick = async () => { await synth.start(); $('audio').textContent = 'Audio ON'; };
+
+// Sound is on by default: browsers only allow audio after a gesture, so the first click/key starts it
+let muted = false;
+try { muted = localStorage.getItem('hbi.muted') === '1'; } catch {}
+const showMute = () => { $('mute').textContent = muted ? 'Unmute (M)' : 'Mute (M)'; $('mute').classList.toggle('done', muted); };
+async function startAudio() {
+  if (synth.ctx) return;
+  await synth.start(); synth.setMuted(muted);
+  $('soundhint').hidden = true;
+}
+$('soundhint').hidden = false;
+for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, startAudio, { once: false, passive: true });
+function toggleMute() {
+  muted = !muted; showMute();
+  try { localStorage.setItem('hbi.muted', muted ? '1' : '0'); } catch {}
+  if (synth.ctx) synth.setMuted(muted);
+}
+$('mute').onclick = toggleMute;
+showMute();
+
 const snap = () => (hydra?.on ? (hydraSnap = true) : cur.snapshot());
 $('snap').onclick = snap;
 const toggleMode = async () => {
@@ -131,24 +165,79 @@ $('clear').onclick = () => cur.clear();
 $('view').onclick = nextView;
 $('hide').onclick = () => $('hud').classList.toggle('hidden');
 $('simbtns').onclick = e => e.target.dataset.m && window.sim?.setMode?.(e.target.dataset.m);
-addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); if (e.key === 'v') nextView(); });
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'h') $('hud').classList.toggle('hidden');
+  if (e.key === 's') snap();
+  if (e.key === 'g') toggleMode();
+  if (e.key === 'v') nextView();
+  if (e.key === 'm') toggleMute();
+  if (e.key === 'Enter') reuseBaseline();
+});
+
+// Readiness: idle (no stream) → contact (fit the headband) → uncalibrated → live
+const contactOk = q => q.label === 'good' || q.label === 'noisy';
+function readiness(r, now) {
+  if (!lastEeg || now - lastEeg > 1500) return 'idle';
+  if (r.quality.filter(contactOk).length < 3) return 'contact';
+  if (!sessionCal || r.calibration.state === 'running') return 'uncalibrated';
+  return 'live';
+}
+function reuseBaseline() {
+  if (!pipe.calibrated || sessionCal || state.ready !== 'uncalibrated' || calWas === 'running') return;
+  sessionCal = true; msg('Using your saved baseline — recalibrate (C) any time');
+}
+$('step').onclick = reuseBaseline;
+
+function stepText(ready, r) {
+  const n = r.quality.filter(contactOk).length;
+  if (ready === 'idle') return 'Connect your Muse to begin';
+  if (ready === 'contact') return `Adjust the fit — ${n}/4 sensors reading (wet the sensors, headband snug)`;
+  if (ready === 'uncalibrated') {
+    if (r.calibration.state === 'running') return 'Calibrating…';
+    return pipe.calibrated ? 'Calibrate (C) to begin — or Enter to reuse your saved baseline' : 'Calibrate (C) to begin';
+  }
+  return r.bpm ? 'Live' : 'Live — looking for your pulse (sit still)';
+}
+
+// dock readouts
+const QCLASS = { good: 'q-good', noisy: 'q-noisy', 'no contact': 'q-bad', railed: 'q-bad', off: 'q-off' };
+const pct = v => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
+const meter = (k, v) => { $('m-' + k).style.width = pct(v); $('v-' + k).textContent = v.toFixed(2); };
 
 // DSP @20Hz (heart clock resolution ≈50ms) — all signal math lives in src/dsp; main only consumes the result
 setInterval(() => {
-  const r = (sig = pipe.tick(performance.now()));
+  const now = performance.now();
+  const r = (sig = pipe.tick(now));
+  const ready = (state.ready = readiness(r, now));
+  const streaming = ready !== 'idle';
   for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
-  state.asym = r.asym; state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
-  state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = performance.now();
-  meter('relax', r.relax); meter('focus', r.focus);
+  for (let i = 0; i < 4; i++) {
+    state.quality[i].label = streaming ? r.quality[i].label : 'off';
+    state.quality[i].score = streaming ? r.quality[i].score : 0;
+    state.held[i] = streaming && r.held[i];
+  }
+  if (r.artifact.motion) motionUntil = now + 1000;
+  state.motion = streaming && now < motionUntil;
+  state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
+  state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = now;
+
+  const live = ready === 'live';
+  meter('relax', live ? r.relax : 0); meter('focus', live ? r.focus : 0);
+  for (const k of BAND_NAMES) $('kb-' + k).style.width = pct(live ? state.bands[k] : 0);
   lab.update(r);
   $('bpm').textContent = r.bpm ? `♥ ${Math.round(r.bpm)}` : r.beatConf > 0.05 ? '♥ …' : '♥ --';
   $('bpm').title = r.heartSource ? `heart lock ${Math.round(r.beatConf * 100)}% via ${r.heartSource} PPG` : 'looking for a pulse';
-  for (const k of BAND_NAMES) $('b-' + k).style.width = `${Math.round(state.bands[k] * 200)}px`;
+  $('step').textContent = stepText(ready, r);
+  $('step').dataset.ready = ready;
+  for (let i = 0; i < 4; i++) $('s-' + CH[i]).setAttribute('class', state.held[i] ? 'q-held' : QCLASS[state.quality[i].label] || 'q-off');
+
   diag.ticks++; if (r.artifact.rejected) diag.rejected++;
   for (const e of r.events) {
     diag[e] = (diag[e] || 0) + 1;
+    if (!live) continue;   // before sync nothing reacts — not even to real beats
     if (e === 'beat') { const k = Math.min(1, r.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
-    else if (e === 'blink' || e === 'clench') { cur.onBlink(); synth.blink(); }   // mapping: blink/clench → flash + glitch, noise burst
+    else if (e === 'blink' || e === 'clench') { cur.onBlink(); synth.blink(); }   // mapping: blink/clench → disturbance + glitch, noise burst
   }
   updateCalibration(r.calibration);
 }, 50);
@@ -159,7 +248,7 @@ const CAL_STEPS = {
   closed: ['STEP 2 OF 2 · EYES CLOSED', 'Close your eyes and relax. Two rising tones mean done — open your eyes then.'],
 };
 let calPhase = null;
-function showCalibrated() { $('calib').classList.toggle('done', pipe.calibrated); $('calib').textContent = pipe.calibrated ? 'Recalibrate (C)' : 'Calibrate (C)'; }
+function showCalibrated() { $('calib').classList.toggle('done', sessionCal); $('calib').textContent = pipe.calibrated ? 'Recalibrate (C)' : 'Calibrate (C)'; }
 function updateCalibration(c) {
   if (c.state === 'running') {
     if (c.phase !== calPhase) {
@@ -172,10 +261,11 @@ function updateCalibration(c) {
   if (c.state === calWas) return;
   if (calWas === 'running' && c.state === 'done') {
     try { localStorage.setItem(CAL_KEY, JSON.stringify(pipe.exportCalibration())); } catch {}
+    sessionCal = true;
     synth.cue(2);
     const g = c.result.alphaGainDb, gs = `${g >= 0 ? '+' : ''}${g.toFixed(1)} dB`;
-    msg(c.result.verdict === 'strong' ? `Calibrated — eyes-closed alpha ${gs}: clear signal. RELAX/FOCUS now use your range.`
-      : c.result.verdict === 'weak' ? `Calibrated — eyes-closed alpha only ${gs}: weak. Wet the ear sensors and try again for a clearer range.`
+    msg(c.result.verdict === 'strong' ? `Calibrated — eyes-closed alpha ${gs}: clear signal. You're live.`
+      : c.result.verdict === 'weak' ? `Calibrated — eyes-closed alpha only ${gs}: weak. Wet the ear sensors and recalibrate for a clearer range.`
       : `Eyes-closed alpha didn't rise (${gs}) — check ear-sensor contact, then recalibrate. Using defaults meanwhile.`);
   }
   $('calov').hidden = c.state !== 'running';
@@ -184,6 +274,7 @@ function updateCalibration(c) {
 }
 function startCalibration() {
   if (calWas === 'running') return;
+  if (state.ready === 'idle' || state.ready === 'contact') { msg('Get at least 3 sensors reading first (see the sensor map)'); return; }
   $('calfill').style.width = '0%'; pipe.startCalibration({ open: 10, closed: 10 });
   if (source === window.sim) msg('Calibrating on SIM — connect the Muse for a real baseline');
 }
@@ -191,7 +282,7 @@ function startCalibration() {
 function settleCalibration(text) {
   calWas = pipe.calibrated ? 'done' : 'none'; calPhase = null;
   $('calov').hidden = true; showCalibrated();
-  msg(text + (pipe.calibrated ? ' — keeping previous baseline' : ''));
+  msg(text + (pipe.calibrated ? ' — saved baseline still available (Enter)' : ''));
 }
 function cancelCalibration() {
   if (calWas !== 'running') return;
@@ -202,25 +293,20 @@ $('calib').onclick = startCalibration;
 const lab = new Lab($('lab'));
 const toggleLab = () => { $('labbtn').classList.toggle('done', lab.toggle()); };
 $('labbtn').onclick = toggleLab;
-const meter = (k, v) => { $('m-' + k).style.width = `${Math.round(v * 200)}px`; $('v-' + k).textContent = v.toFixed(2); };
 $('calcancel').onclick = cancelCalibration;
 addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'c') startCalibration(); if (e.key === 'l') toggleLab(); if (e.key === 'Escape') cancelCalibration(); });
 showCalibrated();
 
-// Signal quality + stream health @1Hz (scores computed in src/dsp)
-const QC = { good: '#00ff9c', noisy: '#ffb000', 'no contact': '#ff3355', railed: '#ff3355' };
+// stream health @1Hz
 setInterval(() => {
   if (!sig) return;
-  $('sq').innerHTML = CH.map((n, i) => {
-    const q = sig.quality[i];
-    return `<span title="${n}: ${q.label} (σ ${q.std.toFixed(1)}µV, score ${q.score.toFixed(2)})" style="color:${QC[q.label] || '#fff'}">● ${n}</span>`;
-  }).join(' ') + `<br><span class="dim">EEG ${rate.eeg}Hz · PPG ${rate.ppg}Hz · IMU ${rate.imu}/s${sig.artifact.rejected ? ' · artifact hold' : ''}</span>`;
+  $('rates').textContent = `EEG ${rate.eeg}Hz · PPG ${rate.ppg}Hz · IMU ${rate.imu}/s${sig.artifact.rejected && state.ready !== 'idle' ? ' · artifact hold' : ''}`;
   rate.eeg = rate.ppg = rate.imu = 0;
 }, 1000);
 
-let savedView = 'spray';
-try { savedView = localStorage.getItem('hbi.view') || 'spray'; } catch {}
-await setView(VIEWS.includes(savedView) ? savedView : 'spray');
+let savedView = 'ink';
+try { savedView = localStorage.getItem('hbi.view') || 'ink'; } catch {}
+await setView(VIEWS.includes(savedView) ? savedView : 'ink');
 
 let prev = performance.now();
 (function loop(t) {
