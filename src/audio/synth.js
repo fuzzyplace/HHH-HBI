@@ -148,6 +148,22 @@ export class Synth {
       o.onended = () => g.disconnect();
     }
   }
+  /** guided-session tones. down n=5…1 falls (close your eyes), up n=1…5 rises (coming back),
+   *  closed = one soft low bell (eyes closed now), open = bright two-note chime (open your eyes) */
+  sessionTone(kind, n = 1) {
+    if (!this.ctx) return;
+    const PENT = [392.0, 440.0, 523.25, 587.33, 659.25];   // G A C D E
+    const notes = kind === 'down' || kind === 'up' ? [[PENT[Math.max(0, Math.min(4, n - 1))], 0, 0.07, 0.9]]
+      : kind === 'closed' ? [[196.0, 0, 0.06, 2.2]]
+      : [[523.25, 0, 0.07, 1.4], [783.99, 0.18, 0.06, 1.8]];
+    for (const [f, dt, a, dec] of notes) {
+      const t = this.ctx.currentTime + dt, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0008, t + dec);
+      o.connect(g).connect(this.bus); o.start(t); o.stop(t + dec + 0.05);
+      o.onended = () => g.disconnect();
+    }
+  }
   blink() {
     if (!this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();

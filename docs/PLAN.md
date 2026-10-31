@@ -39,6 +39,12 @@ Calibration cues: one soft tone at step 1→2, two rising tones at the end (audi
 
 UI: one bottom-centre dock (status, steps, sensor map, band key, relax/focus, controls). H hides it for immersive mode. M mutes; sound starts on the first click/key.
 
+## Guided sessions + playback (`src/session/`)
+- **Begin session (R)** (only when Live; length 1/3/5/10 min): eyes open 30s → eyes closed N min → eyes open 30s. A falling 5…1 countdown (one tone per second, G-A-C-D-E pentatonic descending) leads into eyes closed; a low bell marks it. In the last 5s of eyes closed, rising tones count 1…5, then a two-note chime means open your eyes. Banner top-centre (dims while eyes are closed); Esc ends early.
+- **Recording**: the derived `state` stream (bands, per-channel bands/quality/holds, relax, focus, heart, tilt/gyro, readiness, eyes-open/closed phase, alpha dB) at 20Hz + beat/blink events. No raw samples, no device IDs. Saved in this browser only (IndexedDB `hbi/sessions`, newest 8); **Export** downloads JSON on click.
+- **Summary** after a session: eyes-closed vs eyes-open relax, alpha dB difference, heart rate (live seconds only).
+- **Play back (P)**: the recording drives the current view and the sound exactly as live (beats, artifacts, arm lights); replay bar shows progress with open/closed markers. Esc/P stops.
+
 ## Visual stack
 three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles in curl-ish noise flow, respawning at the tilt-aimed emitter + 4 electrode attractors → ping-pong feedback buffer (painting memory, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. Data-rain glyph layer. Hydra glitch mode (G) reads relax/focus. 2D fallback (scene.js) follows the same mapping in simplified form.
 
@@ -48,6 +54,7 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 3. **Signal quality (done)** — artifact rejection, per-channel quality.
 3c. **Heart + calm views (done — awaiting real-headband check)** — PPG on all 3 channels (was ambient-only), autocorrelation heart tracker + beat clock pacing everything, audible thump, SPRAY + ORBS views.
 3d. **INK + binaural (done — awaiting real-headband check)** — readiness gate, fluid ink view with cyborg injector arms, binaural band chord on by default + mute, bottom dock, beat-only motion everywhere.
+3e. **Sessions + depth (done — awaiting real-headband check)** — guided open/closed session with countdown tones, recording + playback + export, INK colour/depth, PAINT impasto.
 3b. **Signal truth (done)** — dB smoothing, relax/focus indices, two-step calibration, Signal Lab (L), docs/SIGNALS.md, heartbeat motion + thump.
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, granular textures, generative melody from alpha/theta (audio-designer).

@@ -5,6 +5,8 @@ import { SimulatedSource } from './input/simulated.js';
 import { GpuScene } from './visuals/gpu.js';
 import { Scene } from './visuals/scene.js';
 import { Synth } from './audio/synth.js';
+import { Recorder, Replayer, saveSession, listSessions, exportSession } from './session/recorder.js';
+import { SessionGuide } from './session/guide.js';
 
 const $ = id => document.getElementById(id);
 let scene, hydra = null, hydraSnap = false;
@@ -46,6 +48,9 @@ async function setView(v) {
 const nextView = () => setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
 window.hbiViews = () => ({ view, cur, views, state });   // console/debug handle (no signal data beyond the state object)
 const synth = new Synth();
+// guided sessions + recording/replay (declared before useSim(): swapTo ends a running session)
+const rec = new Recorder(), guide = new SessionGuide(), gv = {}, repEvents = [];
+let replay = null, sessionList = [], sourceLabel = 'SIM';
 window.hbiSynth = synth;
 const pipe = new SignalPipeline();
 const CAL_KEY = 'hbi.calibration.v2';   // local-only: eyes-open/closed index levels (dB) + timestamp, no device IDs
@@ -117,7 +122,9 @@ function swapTo(src, label) {
   sessionCal = false; lastEeg = 0;   // every new source re-syncs: contact check + calibration before anything moves
   state.battery = null; $('batt').textContent = '🔋 --';
   $('simbtns').hidden = label !== 'SIM';
-  setStatus(label);
+  if (guide.on) finishSession(`Session ended — switched to ${label}`);
+  if (replay) stopReplay();
+  sourceLabel = label; setStatus(label);
 }
 function useSim() { const s = (window.sim = new SimulatedSource()); wire(s); swapTo(s, 'SIM'); s.start(); }
 useSim();
@@ -176,6 +183,9 @@ addEventListener('keydown', e => {
   if (e.key === 'v') nextView();
   if (e.key === 'm') toggleMute();
   if (e.key === 'Enter') reuseBaseline();
+  if (e.key === 'r') toggleSession();
+  if (e.key === 'p') toggleReplay();
+  if (e.key === 'Escape') { if (guide.on) finishSession('Session ended early'); else if (replay) stopReplay('Playback stopped'); }
 });
 
 // Readiness: idle (no stream) → contact (fit the headband) → uncalibrated → live
@@ -208,42 +218,132 @@ const QCLASS = { good: 'q-good', noisy: 'q-noisy', 'no contact': 'q-bad', railed
 const pct = v => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
 const meter = (k, v) => { $('m-' + k).style.width = pct(v); $('v-' + k).textContent = v.toFixed(2); };
 
-// DSP @20Hz (heart clock resolution ≈50ms) — all signal math lives in src/dsp; main only consumes the result
+// DSP @20Hz (heart clock resolution ≈50ms) — all signal math lives in src/dsp; main only consumes the result.
+// During playback the recorded state stream replaces the live one (the headset keeps streaming underneath).
 setInterval(() => {
   const now = performance.now();
   const r = (sig = pipe.tick(now));
-  const ready = (state.ready = readiness(r, now));
-  const streaming = ready !== 'idle';
-  for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
-  for (let i = 0; i < 4; i++) {
-    state.quality[i].label = streaming ? r.quality[i].label : 'off';
-    state.quality[i].score = streaming ? r.quality[i].score : 0;
-    state.held[i] = streaming && r.held[i];
+  let events;
+  if (replay) {
+    events = replay.step(state, repEvents);
+    beatBase = state.beatPhase; beatAt = now;
+    if (replay.done) stopReplay('Playback finished — P to play again');
+    else $('replayfill').style.width = pct(replay.progress);
+  } else {
+    events = r.events;
+    const ready = (state.ready = readiness(r, now));
+    const streaming = ready !== 'idle';
+    for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
+    for (let i = 0; i < 4; i++) {
+      state.quality[i].label = streaming ? r.quality[i].label : 'off';
+      state.quality[i].score = streaming ? r.quality[i].score : 0;
+      state.held[i] = streaming && r.held[i];
+    }
+    if (r.artifact.motion) motionUntil = now + 1000;
+    state.motion = streaming && now < motionUntil;
+    state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
+    state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = now;
+    lab.update(r);
+    diag.ticks++; if (r.artifact.rejected) diag.rejected++;
+    for (const e of events) diag[e] = (diag[e] || 0) + 1;
   }
-  if (r.artifact.motion) motionUntil = now + 1000;
-  state.motion = streaming && now < motionUntil;
-  state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
-  state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = now;
 
-  const live = ready === 'live';
-  meter('relax', live ? r.relax : 0); meter('focus', live ? r.focus : 0);
+  const ready = state.ready, live = ready === 'live';
+  meter('relax', live ? state.relax : 0); meter('focus', live ? state.focus : 0);
   for (const k of BAND_NAMES) $('kb-' + k).style.width = pct(live ? state.bands[k] : 0);
-  lab.update(r);
-  $('bpm').textContent = r.bpm ? `♥ ${Math.round(r.bpm)}` : r.beatConf > 0.05 ? '♥ …' : '♥ --';
-  $('bpm').title = r.heartSource ? `heart lock ${Math.round(r.beatConf * 100)}% via ${r.heartSource} PPG` : 'looking for a pulse';
-  $('step').textContent = stepText(ready, r);
+  $('bpm').textContent = state.bpm ? `♥ ${Math.round(state.bpm)}` : state.beatConf > 0.05 ? '♥ …' : '♥ --';
+  $('bpm').title = replay ? 'recorded heartbeat' : r.heartSource ? `heart lock ${Math.round(r.beatConf * 100)}% via ${r.heartSource} PPG` : 'looking for a pulse';
+  $('step').textContent = replay ? `Replaying — ${replay.phase === 'closed' ? 'eyes closed' : 'eyes open'} part` : guide.on ? 'Session running' : stepText(ready, r);
   $('step').dataset.ready = ready;
   for (let i = 0; i < 4; i++) $('s-' + CH[i]).setAttribute('class', state.held[i] ? 'q-held' : QCLASS[state.quality[i].label] || 'q-off');
 
-  diag.ticks++; if (r.artifact.rejected) diag.rejected++;
-  for (const e of r.events) {
-    diag[e] = (diag[e] || 0) + 1;
+  for (const e of events) {
     if (!live) continue;   // before sync nothing reacts — not even to real beats
-    if (e === 'beat') { const k = Math.min(1, r.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
+    if (e === 'beat') { const k = Math.min(1, state.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
     else if (e === 'blink' || e === 'clench') { cur.onBlink(); synth.blink(); }   // mapping: blink/clench → disturbance + glitch, noise burst
   }
-  updateCalibration(r.calibration);
+  if (!replay) { updateCalibration(r.calibration); runSession(now, r, events); }
 }, 50);
+
+// Guided session: eyes open 30s → eyes closed N min → eyes open 30s, recorded for playback
+const PHASE_UI = {
+  open: ['EYES OPEN · 1 OF 3', 'Eyes open — soft gaze on the ink. Notice what it shows.', 'Close your eyes in…'],
+  closed: ['EYES CLOSED · 2 OF 3', 'Eyes closed — breathe slowly. Rising tones will bring you back.', 'Coming back… open your eyes at the chime'],
+  open2: ['EYES OPEN · 3 OF 3', 'Open your eyes — see how the ink changed.', ''],
+};
+function toggleSession() { guide.on ? finishSession('Session ended early') : beginSession(); }
+function beginSession() {
+  if (guide.on || replay) return;
+  if (state.ready !== 'live') { msg('Sync first: the dock step must read Live before a session'); return; }
+  if (calWas === 'running') return;
+  const min = +$('medlen').value || 3;
+  guide.start(min, performance.now()); rec.start({ closedMin: min, source: sourceLabel });
+  $('sessov').hidden = false; $('session').textContent = 'End session (R)'; $('session').classList.add('done');
+  msg(`Session: 30s eyes open, ${min} min eyes closed, 30s eyes open. Recording.`);
+}
+function runSession(now, r, events) {
+  if (!guide.on) return;
+  const g = guide.step(now, gv);
+  rec.push(state, events, r.dB.alpha, g.phaseIndex);
+  const [label, txt, countTxt] = PHASE_UI[g.phase];
+  $('sessphase').textContent = label;
+  $('sesstxt').textContent = g.count != null && countTxt ? countTxt : txt;
+  $('sesscount').textContent = g.count ?? '';
+  $('sessov').classList.toggle('count', g.count != null);
+  $('sessov').classList.toggle('closed', g.phase === 'closed' && g.count == null);
+  $('sessfill').style.width = pct(g.progress);
+  if (g.tone) synth.sessionTone(g.tone.kind, g.tone.n);
+  if (g.done) finishSession(null);
+}
+async function finishSession(text) {
+  if (!guide.on) return;
+  guide.stop();
+  const s = rec.stop();
+  $('sessov').hidden = true; $('session').textContent = 'Begin session (R)'; $('session').classList.remove('done');
+  if (!s || s.n < 20 * 20) { msg((text || 'Session ended') + ' — too short to save'); return; }
+  await saveSession(s); await refreshSessions(s.id);
+  msg((text ? text + '. ' : '') + summaryText(s.summary) + ' — P to play it back');
+}
+function summaryText(sm) {
+  const o = sm.open, o2 = sm.open2, c = sm.closed;
+  const openN = o.sec + o2.sec;
+  if (!c.sec || !openN) return 'Session saved';
+  const avg = k => (o[k] * o.sec + o2[k] * o2.sec) / openN;
+  const da = c.alphaDb - avg('alphaDb');
+  const hr = c.bpm && avg('bpm') ? ` · ♥ ${Math.round(c.bpm)} vs ${Math.round(avg('bpm'))}` : '';
+  return `Saved. Eyes closed vs open: relax ${c.relax.toFixed(2)} vs ${avg('relax').toFixed(2)} · alpha ${da >= 0 ? '+' : ''}${da.toFixed(1)} dB${hr}`;
+}
+
+// Playback: the saved state stream drives the current view and the sound exactly as it did live
+async function refreshSessions(selectId) {
+  sessionList = await listSessions();
+  const fmt = s => `${new Date(s.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.closedMin} min`;
+  $('sessions').innerHTML = sessionList.length ? sessionList.map(s => `<option value="${s.id}">${fmt(s)}</option>`).join('') : '<option value="">no sessions yet</option>';
+  if (selectId) $('sessions').value = selectId;
+  $('replay').disabled = $('export').disabled = !sessionList.length;
+}
+const selected = () => sessionList.find(s => s.id === $('sessions').value) || sessionList[0];
+function toggleReplay() { replay ? stopReplay('Playback stopped') : startReplay(selected()); }
+function startReplay(s) {
+  if (!s || guide.on || calWas === 'running') return;
+  replay = new Replayer(s);
+  cur.clear(); setStatus('REPLAY');
+  $('replaylabel').textContent = `Playback · ${new Date(s.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.closedMin} min eyes closed`;
+  $('replaymarks').innerHTML = s.marks.map(m => `<i class="${m.phase === 'closed' ? 'closed' : 'open'}" style="left:${(100 * m.i / s.n).toFixed(2)}%"></i>`).join('');
+  $('replayfill').style.width = '0%'; $('replaybar').hidden = false; $('replay').textContent = 'Stop (P)';
+}
+function stopReplay(text) {
+  if (!replay) return;
+  replay = null; $('replaybar').hidden = true; $('replay').textContent = 'Play back (P)';
+  setStatus(sourceLabel);
+  if (text) msg(text);
+}
+$('session').onclick = toggleSession;
+$('sessend').onclick = () => finishSession('Session ended early');
+$('replay').onclick = toggleReplay;
+$('replaystop').onclick = () => stopReplay('Playback stopped');
+$('export').onclick = () => { const s = selected(); if (s) exportSession(s); };
+refreshSessions();
 
 // Calibration: step 1 eyes open, step 2 eyes closed (10s clean each); a tone marks each step when audio is on
 const CAL_STEPS = {
@@ -277,6 +377,7 @@ function updateCalibration(c) {
 }
 function startCalibration() {
   if (calWas === 'running') return;
+  if (replay || guide.on) { msg('Finish the session or playback before calibrating'); return; }
   if (state.ready === 'idle' || state.ready === 'contact') { msg('Get at least 3 sensors reading first (see the sensor map)'); return; }
   $('calfill').style.width = '0%'; pipe.startCalibration({ open: 10, closed: 10 });
   if (source === window.sim) msg('Calibrating on SIM — connect the Muse for a real baseline');

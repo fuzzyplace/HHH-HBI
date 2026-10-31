@@ -93,4 +93,8 @@ INK is **monitoring first, art second**: every mark on screen comes from a real 
 - **Sound = the same bands.** Each band has its own tone pair; louder band, louder tone. With headphones each pair produces a binaural beat at that band's rhythm (2/6/10/18/40Hz); on speakers you hear a gentle beating instead. This is an art and meditation tool — binaural tones here mirror your signal; they are not a treatment.
 - SPRAY, ORBS and PAINT follow the same gate and beat-only motion.
 
+## Sessions: see your eyes-closed change
+
+Alpha (8–13Hz, cyan) is the most reliable thing a Muse shows: it usually rises when you close your eyes and relax. A session (R) makes that visible: 30s eyes open, a few minutes eyes closed, 30s eyes open again, guided by tones so you never need to look. Afterwards the summary compares the eyes-closed part with the eyes-open parts, and **Play back (P)** replays the whole thing — the ink, the arms, the heartbeat and the sound — so you can watch what your brain did while your eyes were closed. Sessions stay in this browser unless you press Export.
+
 Full mapping table: `docs/PLAN.md`.
