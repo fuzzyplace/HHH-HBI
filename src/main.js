@@ -16,6 +16,7 @@ const pipe = new SignalPipeline();
 const CAL_KEY = 'hbi.calibration.v1';   // local-only baseline (band stats + timestamp, no device IDs)
 try { const j = JSON.parse(localStorage.getItem(CAL_KEY) || 'null'); if (j && !pipe.importCalibration(j)) localStorage.removeItem(CAL_KEY); } catch {}
 let sig = null;   // latest pipeline result
+let calWas = pipe.calibrated ? 'done' : 'none';   // calibration UI state: none | running | done
 const rate = { eeg: 0, ppg: 0, imu: 0 };   // samples/sec counters for stream health
 const CH = ['TP9', 'AF7', 'AF8', 'TP10'];
 const COLORS = { delta: '#8a4dff', theta: '#ff2bd6', alpha: '#00fff0', beta: '#ffb000', gamma: '#ffffff' };
@@ -49,7 +50,8 @@ function swapTo(src, label) {
   const prev = source;
   source = src;
   prev?.stop();
-  pipe.reset();   // re-learn adaptive ranges per source; calibration is kept
+  pipe.reset();   // re-learn adaptive ranges per source; calibration is kept, a running one is stopped
+  if (calWas === 'running') settleCalibration(`Calibration stopped — switched to ${label}`);
   state.battery = null; $('batt').textContent = '🔋 --';
   setStatus(label);
 }
@@ -81,7 +83,7 @@ $('mode').onclick = toggleMode;
 $('clear').onclick = () => scene.clear();
 $('hide').onclick = () => $('hud').classList.toggle('hidden');
 $('simbtns').onclick = e => e.target.dataset.m && window.sim?.setMode?.(e.target.dataset.m);
-addEventListener('keydown', e => { if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); });
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); });
 
 // DSP @10Hz — all signal math lives in src/dsp; main only consumes the result
 setInterval(() => {
@@ -98,7 +100,6 @@ setInterval(() => {
 }, 100);
 
 // Calibration: 30s eyes-closed rest baseline; only artifact-free windows count
-let calWas = pipe.calibrated ? 'done' : 'none';
 function showCalibrated() { $('calib').classList.toggle('done', pipe.calibrated); $('calib').textContent = pipe.calibrated ? 'Recalibrate (C)' : 'Calibrate (C)'; }
 function updateCalibration(c) {
   if (c.state === 'running') $('calfill').style.width = `${Math.round(c.progress * 100)}%`;
@@ -115,16 +116,20 @@ function startCalibration() {
   $('calfill').style.width = '0%'; pipe.startCalibration(30);
   if (source === window.sim) msg('Calibrating on SIM — connect the Muse for a real baseline');
 }
+// settle UI state here so the next tick doesn't read a cancelled run as "finished"
+function settleCalibration(text) {
+  calWas = pipe.calibrated ? 'done' : 'none';
+  $('calov').hidden = true; showCalibrated();
+  msg(text + (pipe.calibrated ? ' — keeping previous baseline' : ''));
+}
 function cancelCalibration() {
   if (calWas !== 'running') return;
   pipe.cancelCalibration();
-  calWas = pipe.calibrated ? 'done' : 'none';   // settle state here so the next tick doesn't read cancel as "finished"
-  $('calov').hidden = true; showCalibrated();
-  msg(pipe.calibrated ? 'Calibration cancelled — keeping previous baseline' : 'Calibration cancelled');
+  settleCalibration('Calibration cancelled');
 }
 $('calib').onclick = startCalibration;
 $('calcancel').onclick = cancelCalibration;
-addEventListener('keydown', e => { if (e.key === 'c') startCalibration(); if (e.key === 'Escape') cancelCalibration(); });
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'c') startCalibration(); if (e.key === 'Escape') cancelCalibration(); });
 showCalibrated();
 
 // Signal quality + stream health @1Hz (scores computed in src/dsp)

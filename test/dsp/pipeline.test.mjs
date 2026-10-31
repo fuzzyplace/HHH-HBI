@@ -86,9 +86,9 @@ test('calibration counts only clean time, completes, round-trips', () => {
   const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
   run(p, 2, sine(10), clock);
   p.startCalibration(3);
-  let r = run(p, 3, () => 0, clock);                 // no contact: no progress beyond the 1s window still holding old signal
+  let r = run(p, 3, () => 0, clock);                 // no contact: no progress (first window is skipped, then nothing usable)
   assert.equal(r.calibration.state, 'running');
-  assert.ok(r.calibration.cleanSeconds <= 1.05, String(r.calibration.cleanSeconds));
+  assert.ok(r.calibration.cleanSeconds < 0.05, String(r.calibration.cleanSeconds));
   r = run(p, 4, sine(10), clock);
   assert.equal(r.calibration.state, 'done');
   assert.equal(p.calibrated, true);
@@ -113,7 +113,7 @@ test('tick reuses its result object; reset keeps calibration', () => {
   const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
   const a = run(p, 0.1, sine(10), clock), b = run(p, 0.1, sine(10), clock);
   assert.equal(a, b);
-  p.startCalibration(1); run(p, 2, sine(10), clock);
+  p.startCalibration(1); run(p, 3, sine(10), clock);
   assert.equal(p.calibrated, true);
   p.reset();
   assert.equal(p.calibrated, true);
@@ -129,4 +129,47 @@ test('ppg beats surface as events', () => {
     events.push(...run(p, 0.1, sine(10), clock).events);
   }
   assert.ok(events.filter(e => e === 'beat').length >= 3, events.join());
+});
+
+test('a railed or floating temporal electrode cannot lock the pipeline in clench', () => {
+  for (const [name, bad] of [['railed', t => (Math.sin(2 * Math.PI * 3 * t) > 0 ? 1000 : -1000)], ['floating', () => 300 * rnd()]]) {
+    const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
+    run(p, 5, sine(10), clock);
+    const events = [], rejected = [];
+    run(p, 15, (ch, t) => (ch === 0 ? bad(t) : sine(10)(ch, t)), clock, r => { events.push(...r.events); rejected.push(r.artifact.rejected); });
+    const tail = rejected.slice(-50);
+    assert.ok(events.filter(e => e === 'clench').length <= 1, `${name}: ${events.filter(e => e === 'clench').length} clench events`);
+    assert.ok(tail.filter(Boolean).length === 0, `${name}: still rejecting at the end`);
+  }
+});
+
+test('a floating frontal electrode does not fire blinks', () => {
+  const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
+  run(p, 3, sine(10), clock);
+  const events = [];
+  run(p, 15, (ch, t) => (ch === 1 ? 300 * rnd() : sine(10)(ch, t)), clock, r => events.push(...r.events));
+  // the moment the electrode lifts can read as one blink; it must not keep firing
+  assert.ok(events.filter(e => e === 'blink').length <= 1, events.join());
+});
+
+test('sustained high-frequency level becomes the new baseline', () => {
+  const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
+  run(p, 4, sine(10), clock);
+  const hi = (ch, t) => sine(10)(ch, t) + (ch === 0 || ch === 3 ? 15 * (Math.sin(2 * Math.PI * 33 * t) + Math.sin(2 * Math.PI * 41 * t)) : 0);
+  const rejected = [];
+  run(p, 10, hi, clock, r => rejected.push(r.artifact.rejected));
+  assert.ok(rejected.slice(-30).every(v => !v), 'should stop rejecting once the level is the new normal');
+});
+
+test('a channel with contact for under half the calibration borrows the average baseline', () => {
+  const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
+  run(p, 2, sine(10), clock);
+  p.startCalibration(3);
+  const start = clock.t;
+  let j = null;   // snapshot at completion, before the slow baseline drift moves it
+  run(p, 5, (ch, t) => (ch === 3 && t < start + 3.6 ? 0 : sine(10)(ch, t)), clock, r => { if (!j && r.calibration.state === 'done') j = p.exportCalibration(); });
+  assert.equal(p.calibrated, true);
+  // std is untouched by drift: a borrowed baseline matches the average exactly, a channel's own does not
+  assert.deepEqual(j.ch[3].std, j.avg.std);
+  assert.notDeepEqual(j.ch[0].std, j.avg.std);
 });

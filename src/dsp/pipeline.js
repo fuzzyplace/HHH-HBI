@@ -16,6 +16,9 @@ const REJECT_MS = 1000;            // one FFT window: an artifact contaminates t
 const REFRACTORY_MS = 800;
 const DRIFT_TAU_S = 180;           // calibrated baseline mean follows clean signal over ~3 minutes
 const RAIL_UV = 990;               // muse-js µV range is about ±1000
+const FRONTAL = [1, 2], TEMPORAL = [0, 3];   // AF7/AF8 (blink), TP9/TP10 (clench)
+const USABLE_SCORE = 0.25;         // 'noisy' channels below this stay out of averages and calibration
+const CLENCH_ADAPT_TICKS = 30;     // high-frequency level held >3s is the new normal, not a clench
 
 const zeros = () => Object.fromEntries(BAND_NAMES.map(k => [k, 0]));
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -39,6 +42,8 @@ export class SignalPipeline {
     this.re = new Float32Array(N); this.im = new Float32Array(N);
     this.rel = Array.from({ length: channels }, zeros);        // raw relative band power per channel
     this.relAvg = zeros();
+    this.hf = new Float64Array(channels);
+    this.good = new Uint8Array(channels); this.use = new Uint8Array(channels);
     this.beats = 0;
     this.hr = new HeartRate(() => { this.beats++; });
     this.cal = null;               // { avg:{mean,std}, ch:[{mean,std}], t }
@@ -57,7 +62,7 @@ export class SignalPipeline {
     for (let c = 0; c < this.C; c++) { this.buf[c].fill(0); this.pos[c] = 0; this.filled[c] = 0; this.lo[c] = Infinity; this.hi[c] = -Infinity; }
     this.norm = new Normalizer();
     this.chNorm = Array.from({ length: this.C }, () => new Normalizer());
-    this.p2pBase = 60; this.hfBase = new Float64Array(this.C); this.hfN = 0;
+    this.p2pBase = 60; this.hfBase = new Float64Array(this.C); this.hfN = new Int32Array(this.C); this.hfOver = new Int32Array(this.C);
     this.lastBlink = this.lastClench = -Infinity; this.rejectUntil = -Infinity;
     this.motion = false; this.accAvg = null; this.lastT = null; this.beats = 0;
     this.hr = new HeartRate(() => { this.beats++; });
@@ -116,21 +121,33 @@ export class SignalPipeline {
     const dt = this.lastT === null ? 0.1 : Math.min(0.25, Math.max(0, (now - this.lastT) / 1000));
     this.lastT = now;
 
-    // spectra + quality
+    // spectra + quality; detectors trust only 'good' channels, averages take good + mildly noisy
     let usable = 0;
-    const hf0 = this.analyze(0, o.quality[0]);
-    let hfTemporal = hf0;
-    for (let c = 1; c < this.C; c++) { const hf = this.analyze(c, o.quality[c]); if (c === this.C - 1) hfTemporal += hf; }
-    for (let c = 0; c < this.C; c++) if (o.quality[c].label === 'good' || o.quality[c].label === 'noisy') usable++;
+    for (let c = 0; c < this.C; c++) {
+      this.hf[c] = this.analyze(c, o.quality[c]);
+      const q = o.quality[c];
+      this.good[c] = q.label === 'good' ? 1 : 0;
+      this.use[c] = this.good[c] || (q.label === 'noisy' && q.score >= USABLE_SCORE) ? 1 : 0;
+      usable += this.use[c];
+    }
+    const quad = this.C >= 4;
 
-    // blink: frontal (AF7/AF8) peak-to-peak since last tick vs running baseline
-    const p2pOf = c => { const v = this.hi[c] - this.lo[c]; this.lo[c] = Infinity; this.hi[c] = -Infinity; return Number.isFinite(v) ? v : 0; };
-    const p2p = Math.max(p2pOf(1), p2pOf(2)); p2pOf(0); p2pOf(3);
+    // blink: good frontal channels' peak-to-peak since last tick vs running baseline
+    let p2p = 0;
+    if (quad) for (const c of FRONTAL) { const v = this.hi[c] - this.lo[c]; if (this.good[c] && Number.isFinite(v) && v > p2p) p2p = v; }
+    for (let c = 0; c < this.C; c++) { this.lo[c] = Infinity; this.hi[c] = -Infinity; }
     a.blink = p2p > Math.max(150, this.p2pBase * 1.6);
-    this.p2pBase += (Math.min(p2p, this.p2pBase * 2) - this.p2pBase) * 0.02;
+    if (p2p > 0) this.p2pBase += (Math.min(p2p, this.p2pBase * 2) - this.p2pBase) * 0.02;
 
-    // clench: temporal (TP9/TP10) 30–44Hz power jump vs baseline learned on clean ticks
-    a.clench = this.hfN >= 10 && hfTemporal > 4 * this.hfBase[0] && hfTemporal > 1e-6;
+    // clench: 30–44Hz power jump on a good temporal channel vs that channel's clean baseline
+    let clench = false;
+    if (quad) for (const c of TEMPORAL) {
+      if (!this.good[c]) { this.hfN[c] = 0; this.hfOver[c] = 0; continue; }   // re-learn after the electrode reseats
+      if (this.hfN[c] >= 10 && this.hf[c] > 4 * this.hfBase[c] && this.hf[c] > 1e-6) {
+        if (++this.hfOver[c] > CLENCH_ADAPT_TICKS) { this.hfBase[c] = this.hf[c]; this.hfOver[c] = 0; } else clench = true;
+      } else this.hfOver[c] = 0;
+    }
+    a.clench = clench;
 
     a.motion = this.motion; this.motion = false;
 
@@ -139,7 +156,10 @@ export class SignalPipeline {
     if (a.blink || a.clench || a.motion) this.rejectUntil = now + REJECT_MS;
     a.rejected = now < this.rejectUntil || usable === 0;
 
-    if (!a.clench && !a.rejected) { this.hfBase[0] += (hfTemporal - this.hfBase[0]) * (this.hfN < 10 ? 0.5 : 0.05); this.hfN++; }
+    if (quad && !a.clench && !a.rejected) for (const c of TEMPORAL) {
+      if (!this.good[c]) continue;
+      this.hfBase[c] += (this.hf[c] - this.hfBase[c]) * (this.hfN[c] < 10 ? 0.5 : 0.05); this.hfN[c]++;
+    }
 
     for (let n = this.beats; n > 0; n--) ev.push('beat');
     this.beats = 0;
@@ -150,19 +170,21 @@ export class SignalPipeline {
       const avg = this.relAvg;
       for (const k of BAND_NAMES) avg[k] = 0;
       for (let c = 0; c < this.C; c++) {
-        const l = o.quality[c].label; if (l !== 'good' && l !== 'noisy') continue;
+        if (!this.use[c]) continue;
         for (const k of BAND_NAMES) avg[k] += this.rel[c][k] / usable;
       }
-      if (this.calRun) this.feedCalibration(dt);
+      if (this.calRun && now > this.calRun.skipUntil) this.feedCalibration(dt);
       const n = this.normalize(avg, this.norm, this.cal?.avg, dt);
       for (const k of BAND_NAMES) o.bands[k] += (n[k] - o.bands[k]) * 0.3;
       for (let c = 0; c < this.C; c++) {
-        const l = o.quality[c].label; if (l !== 'good' && l !== 'noisy') continue;   // hold lobes with no contact
+        if (!this.use[c]) continue;   // hold lobes with no contact
         const v = this.normalize(this.rel[c], this.chNorm[c], this.cal?.ch[c], dt);
         for (const k of BAND_NAMES) o.ch[c][k] += (v[k] - o.ch[c][k]) * 0.3;
       }
-      const L = (this.rel[0].alpha + this.rel[1].alpha) / 2, R = (this.rel[2].alpha + this.rel[3].alpha) / 2;
-      o.asym += ((R - L) / Math.max(1e-6, R + L) - o.asym) * 0.2;
+      if (quad && this.use[0] && this.use[1] && this.use[2] && this.use[3]) {
+        const L = (this.rel[0].alpha + this.rel[1].alpha) / 2, R = (this.rel[2].alpha + this.rel[3].alpha) / 2;
+        o.asym += ((R - L) / Math.max(1e-6, R + L) - o.asym) * 0.2;
+      }
     }
 
     const cs = o.calibration;
@@ -186,19 +208,22 @@ export class SignalPipeline {
   }
 
   startCalibration(seconds = 30) {
-    this.calRun = { seconds, clean: 0, avg: new Stats(), ch: Array.from({ length: this.C }, () => new Stats()) };
+    // skip one FFT window: it still holds signal from before Start (eyes open, settling)
+    const skipUntil = (this.lastT ?? -Infinity) + REJECT_MS;
+    this.calRun = { seconds, clean: 0, skipUntil, avg: new Stats(), ch: Array.from({ length: this.C }, () => new Stats()) };
   }
   cancelCalibration() { this.calRun = null; }
 
   feedCalibration(dt) {
     const r = this.calRun;
     r.avg.add(this.relAvg);
-    for (let c = 0; c < this.C; c++) { const l = this.out.quality[c].label; if (l === 'good' || l === 'noisy') r.ch[c].add(this.rel[c]); }
+    for (let c = 0; c < this.C; c++) if (this.use[c]) r.ch[c].add(this.rel[c]);
     r.clean += dt;
     if (r.clean < r.seconds) return;
     const pack = s => ({ mean: Array.from(s.mean), std: BAND_NAMES.map((_, b) => s.std(b)) });
-    // a channel that never had contact during calibration borrows the average baseline
-    this.importCalibration({ version: CAL_VERSION, bands: BAND_NAMES, t: Date.now(), avg: pack(r.avg), ch: r.ch.map(s => pack(s.n > 1 ? s : r.avg)) });
+    // a channel with contact for under half the run borrows the average baseline
+    const enough = s => s.n >= Math.max(2, r.avg.n * 0.5);
+    this.importCalibration({ version: CAL_VERSION, bands: BAND_NAMES, t: Date.now(), avg: pack(r.avg), ch: r.ch.map(s => pack(enough(s) ? s : r.avg)) });
     this.calRun = null;
   }
 
