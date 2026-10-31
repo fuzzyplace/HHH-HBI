@@ -80,13 +80,17 @@ The Signal Lab shows the averaged spectrum (1–45 Hz), the last 30 s of Relax a
 3. Clench your jaw: the right end of the spectrum lifts and a magenta marker appears.
 4. Blink: a cyan marker appears; Relax should not jump.
 
-## How it becomes art
+## How it becomes art — reading INK
 
-- **Relax → colour and calm**: palette (cool cyan/violet when calm, hot amber/magenta when not), longer trails, smoother flow.
-- **Focus → energy**: turbulence, glitch, RGB split, sparks.
-- **Heartbeat → pace**: the heart clock sets how fast every view moves, and each beat is a surge (burst of spray, swirl of orbs, push forward in PAINT) with a thump you can hear when audio is on.
-- **Views**: SPRAY (band generators spraying particles), ORBS (swirling band orbs), PAINT (the original, busiest). Press V to switch.
-- **Head tilt → where the paint goes**: new paint is emitted where your head points.
-- Bands and per-channel values only add small texture.
+INK is **monitoring first, art second**: every mark on screen comes from a real reading, so a still screen is information too.
+
+- **Still and dark until synced.** The dock walks through it: connect → fit (sensor map shows ≥3 of 4 reading) → calibrate (or Enter to reuse your saved baseline) → *Live*. A new source (SIM or Muse) always re-syncs.
+- **Where ink comes from = where the sensor sits.** Seen from above, nose up: AF7 left forehead, AF8 right forehead, TP9 left ear, TP10 right ear. Each has a robotic injector arm. Left vs right and forehead vs ears are directly comparable.
+- **Colour = band.** δ violet (1–4Hz), θ magenta (4–8), α cyan (8–13), β amber (13–30), γ white (30–44 — on a Muse often muscle). How much of a colour a site injects is that band's level at that sensor. The key in the dock shows the same colours with live levels.
+- **Arm lights = trust.** Green good, amber noisy, red no contact. A glitching arm means that sensor is in an artifact hold (blink, clench, movement) — its ink pauses because the data isn't trustworthy for that second.
+- **Heartbeat = motion.** Only a real, locked pulse pushes the water (a soft wave from the forehead, where the PPG sensor is) and makes the arms dose. Between beats the ink just drifts on its own momentum. No pulse lock → no motion.
+- **Relax → softer, slower ink; focus → finer curls.** Head turns steer the current.
+- **Sound = the same bands.** Each band has its own tone pair; louder band, louder tone. With headphones each pair produces a binaural beat at that band's rhythm (2/6/10/18/40Hz); on speakers you hear a gentle beating instead. This is an art and meditation tool — binaural tones here mirror your signal; they are not a treatment.
+- SPRAY, ORBS and PAINT follow the same gate and beat-only motion.
 
 Full mapping table: `docs/PLAN.md`.

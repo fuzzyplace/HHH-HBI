@@ -17,6 +17,7 @@ export class GpuScene {
     this.canvas = canvas; this.flash = 0; this.pulse = 0; this.snapReq = false;
     this.ftAvg = 16; this.slow = 0;
     this.relaxS = 0.5; this.focusS = 0.5;   // eased calm/activation indices (dominant drivers)
+    this.beat = 0; this.drift = 0;          // heart-only motion: beat envelope + small decaying drift
   }
 
   async init() {
@@ -38,6 +39,7 @@ export class GpuScene {
       decay: uniform(0.92), zoom: uniform(0.004), rot: uniform(0), smear: uniform(0.003), glitch: uniform(0),
       rain: uniform(0.2), flash: uniform(0), aspect: uniform(innerWidth / innerHeight), shift: uniform(0.002),
       beat: uniform(0), aim: uniform(new THREE.Vector3()),   // beat=brightness swell; aim=head-tilt paint emitter target
+      flow: uniform(0),   // 0..1 motion gate: particles only move after real heartbeats
     });
     this.attrVecs = NODES.map(([x, y, z]) => new THREE.Vector4(x, y, z, 0.5));
     const attr = uniformArray(this.attrVecs, 'vec4');
@@ -63,7 +65,7 @@ export class GpuScene {
       });
       f.addAssign(p.normalize().mul(U.pulse));
       f.subAssign(p.mul(0.12));
-      const dt = min(deltaTime, 0.05);
+      const dt = min(deltaTime, 0.05).mul(U.flow);
       const nv = v.add(f.mul(dt)).mul(pow(U.drag, dt.mul(60)));     // frame-rate independent damping
       v.assign(nv.mul(min(float(1), float(5).div(nv.length().add(1e-4)))));   // speed cap
       p.addAssign(v.mul(dt));
@@ -147,12 +149,15 @@ export class GpuScene {
     for (const rt of [this.fbA, this.fbB]) { r.setRenderTarget(rt); r.clear(); }
     r.setRenderTarget(null); this.rain.clear();
   }
-  onBeat() { this.beat = 1; }                 // heartbeat: forward surge + brightness swell + radial pressure
-  onBlink() { this.flash = 1; }
+  onBeat() { this.beat = 1; this.drift = Math.min(1, this.drift + 0.5); }   // heartbeat: stepped forward surge + brightness swell + radial pressure
+  onBlink() { if (this.live) this.flash = 1; }
   snapshot() { this.snapReq = true; }
 
   frame(st, dt) {
     const U = this.u, b = st.bands, r = this.renderer;
+    // not live: nothing moves — skip compute + render, the canvas keeps its last (or black) image
+    this.live = st.ready === 'live';
+    if (!this.live) { if (this.snapReq) { this.snapReq = false; save(this.canvas); } return; }
     // ---- dominant drivers: relax (calm) and focus (activation); undefined until main.js provides them ----
     const relax = st.relax ?? 0.5, focus = st.focus ?? 0.5;
     const ke = Math.min(1, dt * 1.2);                      // extra local smoothing (~0.8s) on top of DSP smoothing
@@ -160,7 +165,10 @@ export class GpuScene {
     this.focusS += (focus - this.focusS) * ke;
     const R = this.relaxS, F = this.focusS;
     // heartbeat envelope: instant attack, ~0.4s decay — drives dolly/zoom surge, pressure, brightness
-    this.beat = this.beat || 0; this.beat *= Math.pow(0.006, dt);
+    this.beat *= Math.pow(0.006, dt);
+    this.drift *= Math.pow(0.35, dt);                     // ~1s: water settles to rest without beats
+    const flow = Math.min(1, this.beat + this.drift);
+    U.flow.value = flow;
     this.flash *= Math.pow(0.005, dt); U.flash.value = this.flash;
 
     // (4) bands + per-channel = SECONDARY texture detail only (small coefficients)
@@ -168,11 +176,11 @@ export class GpuScene {
     U.size.value = 0.02 + b.delta * 0.02;                  // particle grain, secondary
     U.freq.value = 0.3 + b.theta * 0.5 + F * 0.3;          // noise detail, mostly secondary
     U.rain.value = 0.05 + b.gamma * 0.2;                   // data-rain density, secondary
-    U.smear.value = (0.001 + b.theta * 0.004) * Math.min(dt * 60, 3);
+    U.smear.value = (0.001 + b.theta * 0.004) * Math.min(dt * 60, 3) * flow;
 
     // (2) FOCUS → turbulence + glitch row-tear + RGB shift + sparks/bloom (low=smooth, high=energetic)
     U.turb.value = 0.5 + F * 2.6 + b.gamma * 0.3;
-    U.glitch.value = Math.min(0.9, F * 0.5 + this.flash * 0.7);
+    U.glitch.value = Math.min(0.9, F * 0.5 * flow + this.flash * 0.7);
     U.shift.value = 0.0012 + F * 0.004 + this.flash * 0.02;
 
     // (1) RELAX → palette/mood + trail length + laminar flow (drag). mood=1 → calm cyan/violet, 0 → hot amber/magenta
@@ -181,24 +189,23 @@ export class GpuScene {
     const f60 = dt * 60;                                   // feedback params are per-60fps-frame; scale for real dt
     U.decay.value = Math.pow(0.84 + R * 0.14, f60);        // longer trails when calm
 
-    // (3) HEARTBEAT → forward motion: base drift ∝ bpm/60 (default pace when no heart lock) + beat surge + pressure + brightness
-    const pace = (st.beatConf > 0 && st.bpm > 0 ? st.bpm / 60 : 50 / 60);
-    U.zoom.value = (0.0015 + b.delta * 0.004 + pace * 0.0016 + this.beat * 0.025) * f60;
+    // (3) HEARTBEAT → forward motion, stepped per real beat (~3x slower than before, no default pace)
+    U.zoom.value = ((0.0005 + b.delta * 0.0013) * this.drift + this.beat * 0.008) * f60;
     U.pulse.value = this.beat * 1.1;                        // radial pressure pulse through the particle field
     U.beat.value = this.beat;                              // capped brightness swell in post
-    U.rot.value = (0.0008 + st.gyro.z * 0.00015) * f60;
+    U.rot.value = st.gyro.z * 0.00015 * f60;              // real head roll only
     this.bloomNode.strength.value = 0.5 + F * 0.9 + this.beat * 1.2 + this.flash * 1.5;
 
     // head tilt AIMS where new paint is emitted (clear, screen-scale steer); gyro keeps subtle rotation
     U.aim.value.set(st.tilt.x * 2.3, st.tilt.y * 2.3, st.tilt.x * 0.4);
-    this.group.rotation.y += dt * (0.05 + st.gyro.y * 0.002);
+    this.group.rotation.y += dt * st.gyro.y * 0.002;
     this.group.rotation.x += (st.tilt.y * 0.4 - this.group.rotation.x) * 0.05;
     // beat dollies the camera forward through the accumulated paint, easing back between beats
     const camZ = 6 - this.beat * 1.3, camX = st.tilt.x * 1.2;
     this.cam.position.z += (camZ - this.cam.position.z) * Math.min(1, dt * 12);
     this.cam.position.x += (camX - this.cam.position.x) * 0.05;
     this.cam.lookAt(0, 0, 0);
-    if (this.rain.update(dt, b.gamma)) this.rainTex.needsUpdate = true;
+    if (flow > 0.02 && this.rain.update(dt * flow, b.gamma)) this.rainTex.needsUpdate = true;
 
     r.compute(this.update);
     if (DEBUG === 'scene') { r.setRenderTarget(null); r.render(this.scene, this.cam); return; }

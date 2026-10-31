@@ -1,48 +1,57 @@
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const MASTER = 0.35;   // never above 0.5
+// band → [carrier Hz, binaural beat Hz, octave-layer gain]: a C-major chord, beats at each band's rhythm
+const VOICES = {
+  delta: [130.81, 2, 0.3], theta: [196.0, 6, 0.3], alpha: [261.63, 10, 0], beta: [329.63, 18, 0], gamma: [392.0, 40, 0],
+};
 
 export class Synth {
   ctx = null;
+  muted = false;
   async start() {
     if (this.ctx) return;
     const ctx = (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
     this.master = ctx.createGain(); this.master.gain.value = 0;
-    this.master.gain.setTargetAtTime(0.35, ctx.currentTime, 1.5);
-    this.pan = ctx.createStereoPanner();
+    this.master.gain.setTargetAtTime(this.muted ? 0 : MASTER, ctx.currentTime, 1.5);
     this.comp = ctx.createDynamicsCompressor();
-    // gentle bus limiter: keeps drone + heartbeat thump from clipping into master
+    // gentle bus limiter: keeps the chord + heartbeat thump from clipping into master
     this.comp.threshold.value = -14; this.comp.knee.value = 18;
     this.comp.ratio.value = 4; this.comp.attack.value = 0.004; this.comp.release.value = 0.2;
-    this.dry = ctx.createGain(); this.wet = ctx.createGain(); this.wet.gain.value = 0.3;
-    this.verb = ctx.createConvolver(); this.verb.buffer = this.impulse(3.2);
+    this.dry = ctx.createGain(); this.wet = ctx.createGain(); this.wet.gain.value = 0.2;
+    this.verb = ctx.createConvolver(); this.verb.buffer = this.impulse(3.2);   // 2-ch IR: L→L, R→R, binaural kept
     this.bus = ctx.createGain();
-    this.bus.connect(this.dry).connect(this.pan);
-    this.bus.connect(this.verb).connect(this.wet).connect(this.pan);
-    this.pan.connect(this.comp).connect(this.master).connect(ctx.destination);
-    // drone sub-bus: all sustained voices feed this, so a beat can sidechain-duck the
-    // drone bed (droneBus.gain dip) WITHOUT touching the heartbeat thump, which taps
-    // this.bus directly. droneBus.gain is the duck target (1 = nominal).
+    // no StereoPanner anywhere: it would smear the left/right binaural pairs
+    this.bus.connect(this.dry).connect(this.comp);
+    this.bus.connect(this.verb).connect(this.wet).connect(this.comp);
+    this.comp.connect(this.master).connect(ctx.destination);
+    // drone sub-bus: the band chord feeds this, so a beat can duck the chord (droneBus.gain dip)
+    // WITHOUT touching the heartbeat thump, which taps this.bus directly.
     this.droneBus = ctx.createGain(); this.droneBus.gain.value = 1;
     this.droneBus.connect(this.bus);
 
+    // one binaural pair per band: left ear = carrier, right ear = carrier + the band's beat rate
     this.voices = {};
-    const mk = (name, type, freq, filt) => {
-      const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq;
+    for (const [band, [hz, beat, oct]] of Object.entries(VOICES)) {
       const g = ctx.createGain(); g.gain.value = 0;
-      let node = o;
-      let f = null;
-      if (filt) { f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = filt; o.connect(f); node = f; }
-      node.connect(g); g.connect(this.droneBus); o.start();
-      this.voices[name] = { o, g, f };
-      return { o, g, f };
-    };
-    mk('delta', 'sine', 55);
-    mk('theta', 'triangle', 165, 900);
-    mk('alpha', 'sine', 220); mk('alpha2', 'sine', 329.63);
-    mk('beta', 'sawtooth', 440, 600);
-    const gam = mk('gamma', 'sine', 880);
-    const lfo = ctx.createOscillator(); lfo.frequency.value = 6;
-    const lg = ctx.createGain(); lg.gain.value = 0.02; lfo.connect(lg).connect(gam.g.gain); lfo.start();
+      const merge = ctx.createChannelMerger(2);
+      for (const [ch, f] of [[0, hz], [1, hz + beat]]) {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+        o.connect(merge, 0, ch); o.start();
+      }
+      merge.connect(g);
+      let og = null;
+      if (oct) {   // quiet octave layer (both ears) so laptop speakers can hear the low voices
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = hz * 2;
+        og = ctx.createGain(); og.gain.value = oct; o.connect(og).connect(g); o.start();
+      }
+      g.connect(this.droneBus);
+      this.voices[band] = { g, og };
+    }
     this.noiseBuf = this.noise(0.4);
+  }
+  setMuted(m) {
+    this.muted = !!m;
+    if (this.ctx) this.set(this.master.gain, this.muted ? 0 : MASTER, 0.3);
   }
   impulse(sec) {
     const ctx = this.ctx, n = ctx.sampleRate * sec, b = ctx.createBuffer(2, n, ctx.sampleRate);
@@ -57,20 +66,13 @@ export class Synth {
   set(p, v, tc = 0.25) { p.setTargetAtTime(v, this.ctx.currentTime, tc); }
   update(s) {
     if (!this.ctx) return;
-    const b = s.bands, V = this.voices;
-    this.set(V.theta.g.gain, 0.02 + 0.12 * b.theta, 0.4);
-    this.set(V.theta.f.frequency, 400 + 1200 * b.theta, 0.4);
-    this.set(V.alpha.g.gain, 0.02 + 0.14 * b.alpha, 0.4);
-    this.set(V.alpha2.g.gain, 0.01 + 0.1 * b.alpha, 0.5);
-    this.set(V.beta.g.gain, 0.005 + 0.045 * b.beta, 0.3);
-    this.set(V.gamma.g.gain, 0.003 + 0.03 * b.gamma, 0.3);
-    // relax/focus (0..1, may be undefined → neutral 0.5): modest shaping, heartbeat stays priority
+    const live = s.ready === 'live', b = s.bands, V = this.voices;
+    // your brain plays the chord: each band's voice follows its level, only once synced
+    for (const band in V) this.set(V[band].g.gain, live ? 0.01 + 0.11 * Math.pow(clamp(b[band]), 1.3) : 0, live ? 1 : 1.5);
     const relax = clamp(s.relax == null ? 0.5 : s.relax);
     const focus = clamp(s.focus == null ? 0.5 : s.focus);
-    this.set(this.wet.gain, 0.2 + 0.5 * b.alpha + 0.15 * relax, 0.6);   // relax → wetter
-    this.set(V.beta.f.frequency, 300 + 2500 * b.beta + 800 * clamp(s.tilt.y + 0.5) + 600 * focus, 0.3); // focus → brighter
-    this.set(V.delta.g.gain, 0.05 + 0.35 * b.delta - 0.04 * relax, 0.4); // relax → softer drone
-    this.set(this.pan.pan, clamp(s.asym * 2, -0.8, 0.8), 0.4);
+    this.set(this.wet.gain, 0.12 + 0.28 * relax, 1);                      // relax → wetter (capped: dry stays dominant)
+    for (const band of ['delta', 'theta']) this.set(V[band].og.gain, 0.2 + 0.25 * focus, 1);   // focus → brighter
   }
   // one heartbeat pulse at time t0, scaled by amp. Three layers so it reads on BOTH
   // tiny laptop/phone speakers and headphones:

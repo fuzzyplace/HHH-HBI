@@ -33,11 +33,12 @@ Connection uses **muse-js** (github.com/urish/muse-js, open source, Web Bluetoot
 - Frequent drops: low battery (HUD 🔋), distance > ~3m, or USB 3 / Wi-Fi 2.4GHz interference near the Mac.
 - Flat or noisy signal: see contact dots below — fit and skin contact matter more than anything in software.
 
-## Check it's working (HUD)
-- Status reads `MUSE 2 · WebGPU` (or WebGL2).
+## Check it's working (dock)
+- Status reads `MUSE 2`; the step line walks connect → fit → calibrate → **Live**. The screen stays dark and still until Live — that's intended.
 - Stream line: **EEG ≈256Hz · PPG ≈64Hz · IMU ≈17/s** (IMU counts packets). 0 = not streaming. `· artifact hold` appears for ~1s after a blink/clench/movement.
-- Contact dots TP9 / AF7 / AF8 / TP10: green good, amber noisy, red no contact or railed. Hover for σ (µV) and score (0–1).
+- Sensor map TP9 / AF7 / AF8 / TP10: green good, amber noisy, red no contact or railed, magenta = artifact hold. The matching injector arm lights show the same.
 - Fix red/amber: wet forehead + behind-ear sensors slightly, move hair, sit still ~20s.
+- Use **headphones** for the binaural effect. Sound starts on your first click/key; M mutes.
 
 ## Test script (~10 min)
 Open DevTools console first. Run `hbiDiag()` after each block and paste the output back — it counts events since you connected (signal stats only, no device IDs).
@@ -50,11 +51,12 @@ Open DevTools console first. Run `hbiDiag()` after each block and paste the outp
 | 4 | Hold a clench 6s | 1 clench, then visuals resume after ~3–4s (sustained level becomes the new normal) |
 | 5 | Nod / turn head quickly ×3 | `artifact hold` flickers; no blink/clench storm |
 | 6 | Lift one ear sensor off for 10s, then reseat | that dot goes red/amber; at most 1 event; visuals keep moving on the other channels; recovers after reseat |
-| 7 | Turn audio on, press C: step 1 eyes open (look at one point), step 2 eyes closed until two rising tones | ~25s total; message reports eyes-closed alpha gain — **paste it to me** (≥3 dB = clear) |
+| 7 | Click once (sound starts), press C: step 1 eyes open (look at one point), step 2 eyes closed until two rising tones | ~25s total; message reports eyes-closed alpha gain — **paste it to me** (≥3 dB = clear) |
 | 8 | Press L (Signal Lab). Eyes open 15s, then closed 15s | 8–12Hz bump rises and RELAX climbs with eyes closed; FOCUS drops |
 | 9 | Sit still 30s, audio on, headband snug on forehead | ♥ shows a number within ~10s (hover: lock % and channel); a thump per beat; the view surges in time — compare with your pulse at the wrist |
-| 9b | Press V through SPRAY → ORBS → PAINT | dominant band dominates SPRAY/ORBS; motion paced by your heart |
-| 10 | Reload page | button still says Recalibrate (baseline persisted) |
+| 9b | In INK (default), watch while live | each arm injects its own colours; lift one ear sensor → that arm goes red and its ink stops; blink → forehead arms glitch; nothing moves between heartbeats except drift |
+| 9c | Press V through SPRAY → ORBS → PAINT | dominant band dominates SPRAY/ORBS; motion only on heartbeats |
+| 10 | Reload page | dark until fit is OK; step offers Enter to reuse the saved baseline |
 | 11 | Tilt head left/right/up/down slowly | new paint appears toward where you tilt |
 
 Optional visual checks: tilt/nod → camera drift; S → PNG snapshot; G → glitch-synth mode.

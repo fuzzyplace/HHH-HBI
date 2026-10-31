@@ -4,43 +4,83 @@
 <title>HHH Human Brain Interface</title>
 <link rel="stylesheet" href="/src/style.css">
 </head><body>
-<canvas id="c"></canvas>
+<canvas id="c" hidden></canvas>
 <canvas id="cspray" hidden></canvas>
 <canvas id="corbs" hidden></canvas>
-<div id="hud">
-  <div class="row">
-    <b class="glitch" data-t="HHH//HBI">HHH//HBI</b><span id="status">SIM</span><span id="bpm">♥ --</span><span id="batt">🔋 --</span>
+<canvas id="cink" hidden></canvas>
+<canvas id="carms" aria-hidden="true"></canvas>
+
+<div id="hud" class="dock" role="region" aria-label="Controls and key">
+  <div class="dock-top">
+    <b class="glitch brand" data-t="HHH//HBI">HHH//HBI</b>
+    <span id="status" class="chip">SIM</span>
+    <span id="bpm" class="chip" title="looking for a pulse">♥ --</span>
+    <span id="batt" class="chip">🔋 --</span>
+    <span id="step" class="step">Connect your Muse</span>
   </div>
-  <div id="sq" class="row"></div>
-  <div id="meters">
-    <div class="meter"><span>RELAX</span><i id="m-relax"></i><b id="v-relax">--</b></div>
-    <div class="meter"><span>FOCUS</span><i id="m-focus"></i><b id="v-focus">--</b></div>
+
+  <div class="dock-mid">
+    <svg id="sensormap" viewBox="0 0 100 100" role="img" aria-label="Sensor contact map, top view, nose up">
+      <path class="hm-nose" d="M44 12 L50 3 L56 12"/>
+      <ellipse class="hm-ear" cx="11" cy="56" rx="4" ry="9"/>
+      <ellipse class="hm-ear" cx="89" cy="56" rx="4" ry="9"/>
+      <ellipse class="hm-head" cx="50" cy="52" rx="38" ry="42"/>
+      <circle id="s-PPG" class="hm-ppg" cx="50" cy="13.5" r="2.4"/>
+      <circle id="s-AF7" class="q-off" cx="30" cy="20" r="5.5"/>
+      <circle id="s-AF8" class="q-off" cx="70" cy="20" r="5.5"/>
+      <circle id="s-TP9" class="q-off" cx="13" cy="62" r="5.5"/>
+      <circle id="s-TP10" class="q-off" cx="87" cy="62" r="5.5"/>
+      <text x="30" y="33" text-anchor="middle">AF7</text>
+      <text x="70" y="33" text-anchor="middle">AF8</text>
+      <text x="17" y="78" text-anchor="middle">TP9</text>
+      <text x="83" y="78" text-anchor="middle">TP10</text>
+    </svg>
+
+    <div id="key" aria-label="Band key">
+      <div class="krow" data-band="delta"><i class="sw" style="--c:#8a4dff"></i><span class="kn">delta</span><span class="kh">1–4 Hz</span><span class="kd">deep rest, slow rhythm</span><span class="kt"><i id="kb-delta"></i></span></div>
+      <div class="krow" data-band="theta"><i class="sw" style="--c:#ff2bd6"></i><span class="kn">theta</span><span class="kh">4–8 Hz</span><span class="kd">drowsy, dreamy, drifting</span><span class="kt"><i id="kb-theta"></i></span></div>
+      <div class="krow" data-band="alpha"><i class="sw" style="--c:#00fff0"></i><span class="kn">alpha</span><span class="kh">8–13 Hz</span><span class="kd">relaxed, eyes-closed calm</span><span class="kt"><i id="kb-alpha"></i></span></div>
+      <div class="krow" data-band="beta"><i class="sw" style="--c:#ffb000"></i><span class="kn">beta</span><span class="kh">13–30 Hz</span><span class="kd">alert, active attention</span><span class="kt"><i id="kb-beta"></i></span></div>
+      <div class="krow" data-band="gamma"><i class="sw" style="--c:#ffffff"></i><span class="kn">gamma</span><span class="kh">30–44 Hz</span><span class="kd">fast activity — on Muse often muscle</span><span class="kt"><i id="kb-gamma"></i></span></div>
+    </div>
+
+    <div id="meters">
+      <div class="meter"><span>RELAX</span><span class="mt"><i id="m-relax"></i></span><b id="v-relax">--</b></div>
+      <div class="meter"><span>FOCUS</span><span class="mt"><i id="m-focus"></i></span><b id="v-focus">--</b></div>
+      <p class="mnote">ink colour = band · ink source = sensor · water motion = heartbeat</p>
+    </div>
   </div>
-  <div id="bars" class="dim"></div>
-  <div class="row btns">
-    <button id="connect">Connect Muse 2</button>
-    <button id="audio">Start Audio</button>
-    <button id="view">View: SPRAY (V)</button>
+
+  <div class="dock-btns">
+    <button id="connect">Connect Muse</button>
+    <button id="calib">Calibrate (C)</button>
+    <button id="mute">Mute (M)</button>
+    <button id="view">View: INK (V)</button>
     <button id="mode">Glitch (G)</button>
     <button id="snap">Snapshot (S)</button>
-    <button id="calib">Calibrate (C)</button>
     <button id="labbtn">Signal Lab (L)</button>
     <button id="clear">Clear</button>
-    <button id="hide">Hide HUD (H)</button>
+    <button id="hide">Hide (H)</button>
   </div>
-  <div class="row btns" id="simbtns">
-    <span>SIM:</span>
+  <div class="dock-btns" id="simbtns">
+    <span class="dim">SIM</span>
     <button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button>
   </div>
-  <div id="msg"></div>
+
+  <div class="dock-foot">
+    <span id="msg" aria-live="polite"></span>
+    <span id="soundhint" hidden>tap anywhere to enable sound</span>
+    <span id="rates" class="dim"></span>
+  </div>
 </div>
+
 <div id="calov" hidden>
   <div class="calbox">
     <b id="calstep">STEP 1 OF 2 · EYES OPEN</b>
     <p id="caltxt">Look softly at one point on the screen. Stay still, jaw relaxed.</p>
     <div class="calbar"><i id="calfill"></i></div>
     <p id="calleft" class="dim"></p>
-    <p class="dim small">Why: your brain's alpha rhythm rises when your eyes close. Measuring both states sets RELAX and FOCUS to <em>your</em> range. Blinks and movement pause the timer. With audio on, a tone marks each step.</p>
+    <p class="dim small">Why: your brain's alpha rhythm rises when your eyes close. Measuring both states sets RELAX and FOCUS to <em>your</em> range. Blinks and movement pause the timer. With sound on, a tone marks each step.</p>
     <button id="calcancel">Cancel (Esc)</button>
   </div>
 </div>

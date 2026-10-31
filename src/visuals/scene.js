@@ -20,12 +20,15 @@ export class Scene {
   onBeat() { this.beat = 1; this.rings.push({ r: 0, a: 0.9 }); }   // heartbeat: forward zoom surge + brightness + ring
   onBlink() { this.flash = 1; }
   frame(st, dt) {
+    if (st.ready !== 'live') return;   // still until synced + calibrated (2D fallback for PAINT)
+    this.drift = (this.drift || 0) * Math.pow(0.35, dt); if (this.beat > 0.5) this.drift = Math.min(1, this.drift + dt * 4);
+    const flow = Math.min(1, this.beat + this.drift);
     const g = this.g, { w, h, s } = this, b = st.bands;
     const relax = st.relax ?? 0.5, focus = st.focus ?? 0.5;
     const ke = Math.min(1, dt * 1.2);
     this.relaxS += (relax - this.relaxS) * ke; this.focusS += (focus - this.focusS) * ke;
     const R = this.relaxS, F = this.focusS;
-    this.t += dt; this.rot += st.gyro.z * dt * 0.002;
+    this.t += dt * flow; this.rot += st.gyro.z * dt * 0.002;   // ribbons/rings advance only with heart motion
     this.flash *= Math.pow(0.002, dt);
     this.beat *= Math.pow(0.006, dt);                     // ~0.4s decay
     // (1) RELAX → trail length: calm = longer memory (smaller fade)
