@@ -36,7 +36,7 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 
 ## Phases
 1. **Scaffold (done)**  — Vite app, simulated source, band DSP, canvas scene, synth, snapshot, HUD.
-2. **Hardware (ready to test — see docs/HARDWARE.md)** — muse-js connect, real PPG/motion, reconnect, battery, signal-quality (ble-integrator).
+2. **Hardware (code done, awaiting real-headband test — see docs/HARDWARE.md)** — chooser/timeout/cancel errors, auto-reconnect w/ backoff (5 tries) without reopening chooser, SIM keeps running until Muse streams, fallback to SIM on give-up, battery, device name in HUD (ble-integrator).
 3. **Signal quality** — artifact rejection, per-user baseline calibration (30s eyes-closed), adaptive normalization (dsp-engineer).
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, binaural option, granular textures, generative melody from alpha/theta (audio-designer).
@@ -50,7 +50,7 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 - qa-reviewer: read-only review + tests across repo
 
 ## Assumptions (correct me)
-- Web app via Chrome Web Bluetooth (not native/Electron). Fallback later: Mind Monitor OSC bridge.
+- Web app via Chrome Web Bluetooth (not native/Electron), deployed as a static site on Vercel. Fallback later: Mind Monitor OSC bridge.
 - Muse 2 only (not Muse S / Athena).
 - Plain JS, no framework, Canvas2D first; WebGL in phase 4.
 - Relative band power with adaptive min/max normalization is "good enough" until calibration lands.

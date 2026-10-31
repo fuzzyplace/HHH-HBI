@@ -18,6 +18,10 @@ The app runs with zero hardware: a simulated Muse source (EEG, PPG, motion, blin
 
 Web Bluetooth only works in **Chrome or Edge**, on `localhost` or HTTPS. See `docs/HARDWARE.md` for the hardware test guide.
 
+## Deploy (Vercel)
+
+Static build — Vercel auto-detects Vite; `vercel.json` pins `npm run build` → `dist/`. Vercel's HTTPS satisfies Web Bluetooth's secure-context requirement, so the deployed site can connect a Muse in Chrome/Edge.
+
 ## Docs
 
 - `docs/PLAN.md` — roadmap and signal→visual/audio mapping table
