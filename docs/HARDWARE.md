@@ -34,8 +34,8 @@ Connection uses **muse-js** (github.com/urish/muse-js, open source, Web Bluetoot
 - Flat or noisy signal: see contact dots below — fit and skin contact matter more than anything in software.
 
 ## Check it's working (dock)
-- Status reads `MUSE 2`; the step line walks connect → fit → calibrate → **Live**. The screen stays dark and still until Live — that's intended.
-- Stream line: **EEG ≈256Hz · PPG ≈64Hz · IMU ≈17/s** (IMU counts packets). 0 = not streaming. `· artifact hold` appears for ~1s after a blink/clench/movement.
+- Status reads `MUSE 2`; the step line walks connect → fit → calibrate → **Live**, and the bright button always shows the next step. The screen stays dark and still until Live — that's intended.
+- Stream line (open ⋯): **EEG ≈256Hz · PPG ≈64Hz · IMU ≈17/s** (IMU counts packets). 0 = not streaming. `· artifact hold` appears for ~1s after a blink/clench/movement.
 - Sensor map TP9 / AF7 / AF8 / TP10: green good, amber noisy, red no contact or railed, magenta = artifact hold. The matching injector arm lights show the same.
 - Fix red/amber: wet forehead + behind-ear sensors slightly, move hair, sit still ~20s.
 - Use **headphones** for the binaural effect. Sound starts on your first click/key; M mutes.

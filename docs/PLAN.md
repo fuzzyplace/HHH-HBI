@@ -52,7 +52,13 @@ Calibration cues: one soft tone at step 1→2, two rising tones at the end (audi
 - **ORBS** — five band orbs; swirl only on beat surges.
 - **PAINT** — the original feedback-particle painting; beat-stepped zoom; glitch synth (G) layers over it only.
 
-UI: one bottom-centre dock (status, steps, sensor map, band key, relax/focus, controls). H hides it for immersive mode. M mutes; sound starts on the first click/key.
+UI: one bottom-centre glass dock, three tiers:
+- **Bar**: source, ♥, battery, the current step, and ONE primary button for the next step (Connect Muse → Calibrate → Begin session → End session / Stop playback), with an optional secondary link (try the simulator, use saved baseline).
+- **Readout**: sensor map, band key (Hz and meaning on hover), relax/focus (+ sync in BREATHE).
+- **Controls**: view segment (Ink/Spray/Orbs/Paint) · modes (Play/Breathe/Groove) · sound, snapshot, ⋯. The ⋯ drawer holds device (connect, recalibrate, SIM modes), sessions, tools (glitch, Signal Lab, clear, hide) and the key list.
+- Messages float as a toast above the dock and fade after 7s (never shift buttons under a finger). Once live, 6s without input sinks the dock to near-invisible; any movement brings it back. Hide (H) leaves a faint "controls" pill to bring it back on touch screens.
+- Keyboard: V view · J play · B breathe · N groove · M sound · S snapshot · R session · P playback · C calibrate · Enter saved baseline · L lab · G glitch · H hide · Esc close/end. Sound starts on the first click/key.
+- PAINT (WebGPU, ~650 KB) loads only when first opened.
 
 ## Guided sessions + playback (`src/session/`)
 - **Begin session (R)** (only when Live; length 1/3/5/10 min): eyes open 30s → eyes closed N min → eyes open 30s. A falling 5…1 countdown (one tone per second, G-A-C-D-E pentatonic descending) leads into eyes closed; a low bell marks it. In the last 5s of eyes closed, rising tones count 1…5, then a two-note chime means open your eyes. Banner top-centre (dims while eyes are closed); Esc ends early.
