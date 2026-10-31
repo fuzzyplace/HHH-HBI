@@ -16,6 +16,22 @@ const pipe = new SignalPipeline();
 const CAL_KEY = 'hbi.calibration.v1';   // local-only baseline (band stats + timestamp, no device IDs)
 try { const j = JSON.parse(localStorage.getItem(CAL_KEY) || 'null'); if (j && !pipe.importCalibration(j)) localStorage.removeItem(CAL_KEY); } catch {}
 let sig = null;   // latest pipeline result
+// hardware-test readout: run hbiDiag() in DevTools and paste the JSON (signal stats only, no device IDs)
+const diag = { since: 0, ticks: 0, rejected: 0 };
+const r1 = v => Math.round(v * 100) / 100;
+window.hbiDiag = () => {
+  if (!sig) return null;
+  const out = {
+    source: $('status').textContent, secondsSinceSwap: Math.round((performance.now() - diag.since) / 1000),
+    events: { blink: diag.blink || 0, clench: diag.clench || 0, beat: diag.beat || 0 },
+    rejectedPct: diag.ticks ? Math.round((100 * diag.rejected) / diag.ticks) : 0,
+    quality: Object.fromEntries(CH.map((n, i) => [n, { label: sig.quality[i].label, std: r1(sig.quality[i].std), score: r1(sig.quality[i].score) }])),
+    bands: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.bands[k])])),
+    bpm: Math.round(sig.bpm), calibration: sig.calibration.state, artifactNow: { ...sig.artifact },
+  };
+  console.log(JSON.stringify(out, null, 2));
+  return out;
+};
 let calWas = pipe.calibrated ? 'done' : 'none';   // calibration UI state: none | running | done
 const rate = { eeg: 0, ppg: 0, imu: 0 };   // samples/sec counters for stream health
 const CH = ['TP9', 'AF7', 'AF8', 'TP10'];
@@ -50,6 +66,7 @@ function swapTo(src, label) {
   const prev = source;
   source = src;
   prev?.stop();
+  Object.assign(diag, { since: performance.now(), ticks: 0, rejected: 0, blink: 0, clench: 0, beat: 0 });
   pipe.reset();   // re-learn adaptive ranges per source; calibration is kept, a running one is stopped
   if (calWas === 'running') settleCalibration(`Calibration stopped — switched to ${label}`);
   state.battery = null; $('batt').textContent = '🔋 --';
@@ -92,7 +109,9 @@ setInterval(() => {
   state.asym = r.asym; state.bpm = r.bpm;
   $('bpm').textContent = `♥ ${r.bpm ? Math.round(r.bpm) : '--'}`;
   for (const k of BAND_NAMES) $('b-' + k).style.width = `${Math.round(state.bands[k] * 200)}px`;
+  diag.ticks++; if (r.artifact.rejected) diag.rejected++;
   for (const e of r.events) {
+    diag[e] = (diag[e] || 0) + 1;
     if (e === 'beat') { scene.onBeat(); synth.beat(); }
     else if (e === 'blink' || e === 'clench') { scene.onBlink(); synth.blink(); }   // mapping: blink/clench → flash + glitch, noise burst
   }

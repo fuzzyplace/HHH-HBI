@@ -35,28 +35,34 @@ Connection uses **muse-js** (github.com/urish/muse-js, open source, Web Bluetoot
 
 ## Check it's working (HUD)
 - Status reads `MUSE 2 · WebGPU` (or WebGL2).
-- Stream line: **EEG ≈256Hz · PPG ≈64Hz · IMU ≈17/s** (IMU counts packets). 0 = not streaming.
-- Contact dots TP9 / AF7 / AF8 / TP10: green good (σ 1.5–60µV), amber noisy, red no contact. Hover for σ.
+- Stream line: **EEG ≈256Hz · PPG ≈64Hz · IMU ≈17/s** (IMU counts packets). 0 = not streaming. `· artifact hold` appears for ~1s after a blink/clench/movement.
+- Contact dots TP9 / AF7 / AF8 / TP10: green good, amber noisy, red no contact or railed. Hover for σ (µV) and score (0–1).
 - Fix red/amber: wet forehead + behind-ear sensors slightly, move hair, sit still ~20s.
 
-## Test script (~5 min)
-| Do | Expect |
-|---|---|
-| Sit still, eyes open | beta/gamma moderate, amber glitch rows, faster particles |
-| Close eyes 30s, relax | alpha bar up, cyan/violet palette, longer trails, more reverb |
-| Blink hard ×3 | cyan flash + RGB split + noise burst (adaptive threshold, 0.8s cooldown) |
-| Clench jaw | gamma spike → sparks/bloom, possibly blink trigger |
-| Tilt head L/R, nod | camera drift / field rotation |
-| Breathe slowly | ♥ BPM from PPG; pink pulse per beat (heart readout may take ~10s) |
-| Press S | PNG snapshot |
-| Press G | glitch-synth (Hydra) mode |
+## Test script (~10 min)
+Open DevTools console first. Run `hbiDiag()` after each block and paste the output back — it counts events since you connected (signal stats only, no device IDs).
+
+| # | Do | Expect |
+|---|---|---|
+| 1 | Connect, sit still 60s eyes open | all 4 dots green; EEG ≈256Hz; `rejectedPct` roughly 20–40% (each natural blink holds ~1s — tell me if it feels frozen); blink count ≈ your natural blinks |
+| 2 | Blink hard ×5, ~3s apart | +5 blinks (one per blink), flash + noise burst each |
+| 3 | Clench jaw ×3, 1s each, ~3s apart | +3 clench, few/no extra blinks |
+| 4 | Hold a clench 6s | 1 clench, then visuals resume after ~3–4s (sustained level becomes the new normal) |
+| 5 | Nod / turn head quickly ×3 | `artifact hold` flickers; no blink/clench storm |
+| 6 | Lift one ear sensor off for 10s, then reseat | that dot goes red/amber; at most 1 event; visuals keep moving on the other channels; recovers after reseat |
+| 7 | Press C, eyes closed, still, 30s+ | overlay progress climbs (pauses on blinks); ends with "Baseline saved"; button turns green |
+| 8 | After calibration: eyes open 30s, then closed 30s | bands sit mid-range eyes closed; alpha drops with eyes open |
+| 9 | Breathe slowly 30s | ♥ BPM shows a plausible number; pulse per beat |
+| 10 | Reload page | button still says Recalibrate (baseline persisted) |
+
+Optional visual checks: tilt/nod → camera drift; S → PNG snapshot; G → glitch-synth mode.
 
 ## Debug URL flags
 - `?webgl` force WebGL2 backend · `?particles=65536` override count · `?debug=scene` raw particles, no feedback/post
-- Console: `hbi` = scene, `sim` = simulator
+- Console: `hbi` = scene, `sim` = simulator, `hbiDiag()` = signal/test readout
 
 ## Known gaps (next)
-- No per-user calibration yet — normalization adapts over ~30–60s; ranges reset on connect.
-- Blink threshold is heuristic; tune `1.6x` / `150µV` in `src/main.js` from real data.
+- Thresholds are simulator-tuned: blink `150µV / 1.6×`, clench `4×` 30–44Hz power, motion `45°/s` / `0.25g`, quality σ `1.5 / 60–150µV` — all in `src/dsp/pipeline.js`. Tune from `hbiDiag()` output.
+- Each artifact holds bands for 1s (one FFT window); with natural blinking that's ~25–40% hold time. If visuals feel sticky, shorten the hold or only reject the frontal channels on blinks.
 - Auto-reconnect covers short drops (5 attempts); after that, fallback to SIM and reconnect manually.
 - Fallback option if Web Bluetooth is flaky: BrainFlow (maintained, `MUSE_2_BOARD`) via a local Node→WebSocket bridge.
