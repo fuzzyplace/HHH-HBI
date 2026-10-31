@@ -126,6 +126,10 @@ export async function saveSession(s) {
     if (all.length > KEEP) await tx(d, 'readwrite', st => { for (const x of all.slice(KEEP)) st.delete(x.id); });
   } catch (e) { console.warn('session storage unavailable — kept for this tab only', e); }
 }
+export async function deleteSession(id) {
+  const i = mem.findIndex(x => x.id === id); if (i >= 0) mem.splice(i, 1);
+  try { const d = await db(); await tx(d, 'readwrite', st => st.delete(id)); } catch (e) { console.warn(e); }
+}
 export async function listSessions() {
   try {
     const d = await db();

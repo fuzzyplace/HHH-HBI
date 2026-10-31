@@ -38,7 +38,7 @@ export class Groove {
 
     this.p = { bands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 }, focus: 0.5, relax: 0.5, harmony: 0, conf: 0 };
     this.mode = 'chord'; this.active = false; this.timer = null;
-    this.tempo = 122; this.mult = 2; this.step = 0; this.next = 0; this.arpIdx = 5; this.idleSince = 0;
+    this.tempo = 122; this.mult = 2; this.step = 0; this.next = 0; this.arpIdx = 5; this.idleSince = 0; this.seen = 0;
     this.onKick = null;
   }
   _noise(sec) {
@@ -50,6 +50,7 @@ export class Groove {
 
   /** every frame: signals + whether groove should play (mode groove, live, pulse lock) */
   update(s, groove) {
+    this.seen = performance.now();
     const b = s.bands, p = this.p;
     for (const k in p.bands) p.bands[k] = clamp(b[k] || 0);
     p.focus = clamp(s.focus ?? 0.5); p.relax = clamp(s.relax ?? 0.5); p.harmony = clamp(s.harmony || 0); p.conf = clamp(s.beatConf || 0);
@@ -89,6 +90,11 @@ export class Groove {
   _schedule() {
     const ctx = this.ctx;
     if (!this.active) return;
+    // hidden tab (no frames → no fresh signals) or update() stalled: fade out rather than play stale parts
+    if (document.hidden || performance.now() - this.seen > 500) {
+      this.active = false; this.idleSince = ctx.currentTime; this.out.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+      clearInterval(this.timer); this.timer = null; return;
+    }
     if (this.next < ctx.currentTime) this.next = ctx.currentTime + 0.02;   // tab was throttled: don't burst-catch-up
     while (this.next < ctx.currentTime + LOOK) {
       if (this.target) this.tempo += clamp(this.target - this.tempo, -0.06, 0.06);
