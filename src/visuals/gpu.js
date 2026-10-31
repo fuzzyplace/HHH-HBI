@@ -16,6 +16,7 @@ export class GpuScene {
   constructor(canvas) {
     this.canvas = canvas; this.flash = 0; this.pulse = 0; this.snapReq = false;
     this.ftAvg = 16; this.slow = 0;
+    this.relaxS = 0.5; this.focusS = 0.5;   // eased calm/activation indices (dominant drivers)
   }
 
   async init() {
@@ -36,6 +37,7 @@ export class GpuScene {
       turb: uniform(1), freq: uniform(0.5), drag: uniform(0.97), pulse: uniform(0), mood: uniform(0.5), size: uniform(0.025),
       decay: uniform(0.92), zoom: uniform(0.004), rot: uniform(0), smear: uniform(0.003), glitch: uniform(0),
       rain: uniform(0.2), flash: uniform(0), aspect: uniform(innerWidth / innerHeight), shift: uniform(0.002),
+      beat: uniform(0), aim: uniform(new THREE.Vector3()),   // beat=brightness swell; aim=head-tilt paint emitter target
     });
     this.attrVecs = NODES.map(([x, y, z]) => new THREE.Vector4(x, y, z, 0.5));
     const attr = uniformArray(this.attrVecs, 'vec4');
@@ -66,8 +68,9 @@ export class GpuScene {
       v.assign(nv.mul(min(float(1), float(5).div(nv.length().add(1e-4)))));   // speed cap
       p.addAssign(v.mul(dt));
       If(p.length().greaterThan(7.0), () => {
+        // paint is emitted where the head points (U.aim); feedback zoom then streams it outward
         const s = instanceIndex.mul(3).add(floor(time.mul(60)).toUint().mul(1000003));
-        p.assign(vec3(hash(s), hash(s.add(1)), hash(s.add(2))).sub(0.5).mul(1.5));
+        p.assign(U.aim.add(vec3(hash(s), hash(s.add(1)), hash(s.add(2))).sub(0.5).mul(1.2)));
         v.assign(vec3(0));
       });
     })().compute(N);
@@ -122,7 +125,9 @@ export class GpuScene {
     const scan = float(0.84).add(sin(s.y.mul(screenSize.y).mul(1.7)).mul(0.16));
     const vig = smoothstep(1.15, 0.35, s.sub(0.5).length().mul(1.4));
     const grain = hash(floor(s.x.mul(screenSize.x)).add(floor(s.y.mul(screenSize.y)).mul(4099)).add(floor(time.mul(60)).mul(7919))).sub(0.5).mul(0.05);
-    this.pipeline = new THREE.RenderPipeline(r, vec4(shifted.rgb.add(vec3(0, 1, 0.9).mul(U.flash.mul(0.18))).mul(scan).mul(vig).add(grain), 1));
+    // beat brightness swell is a capped multiply (max +32%) — readable across a room, never a strobe
+    const beatGain = float(1).add(U.beat.mul(0.32));
+    this.pipeline = new THREE.RenderPipeline(r, vec4(shifted.rgb.add(vec3(0, 1, 0.9).mul(U.flash.mul(0.18))).mul(scan).mul(vig).mul(beatGain).add(grain), 1));
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -142,34 +147,55 @@ export class GpuScene {
     for (const rt of [this.fbA, this.fbB]) { r.setRenderTarget(rt); r.clear(); }
     r.setRenderTarget(null); this.rain.clear();
   }
-  onBeat() { this.pulse = 1.2; }
+  onBeat() { this.beat = 1; }                 // heartbeat: forward surge + brightness swell + radial pressure
   onBlink() { this.flash = 1; }
   snapshot() { this.snapReq = true; }
 
   frame(st, dt) {
     const U = this.u, b = st.bands, r = this.renderer;
-    st.ch.forEach((c, i) => { let m = 0; for (const k in c) m = Math.max(m, c[k]); this.attrVecs[i].w = 0.15 + m * 0.9; });
-    U.turb.value = 0.6 + b.beta * 2.4 + b.gamma * 0.8;
-    U.freq.value = 0.3 + b.theta * 0.9;
-    U.drag.value = 0.955 + b.alpha * 0.035;
-    this.pulse *= Math.pow(0.02, dt); U.pulse.value = this.pulse;
+    // ---- dominant drivers: relax (calm) and focus (activation); undefined until main.js provides them ----
+    const relax = st.relax ?? 0.5, focus = st.focus ?? 0.5;
+    const ke = Math.min(1, dt * 1.2);                      // extra local smoothing (~0.8s) on top of DSP smoothing
+    this.relaxS += (relax - this.relaxS) * ke;
+    this.focusS += (focus - this.focusS) * ke;
+    const R = this.relaxS, F = this.focusS;
+    // heartbeat envelope: instant attack, ~0.4s decay — drives dolly/zoom surge, pressure, brightness
+    this.beat = this.beat || 0; this.beat *= Math.pow(0.006, dt);
     this.flash *= Math.pow(0.005, dt); U.flash.value = this.flash;
-    const moodT = Math.min(1, Math.max(0, 0.5 + (b.alpha + 0.5 * b.theta) - (b.beta + 0.5 * b.gamma)));
-    U.mood.value += (moodT - U.mood.value) * Math.min(1, dt * 1.5);
-    U.size.value = 0.02 + b.delta * 0.025;
-    const f60 = dt * 60;                                   // feedback params are per-60fps-frame; scale for real dt
-    U.decay.value = Math.pow(0.86 + b.alpha * 0.115, f60);
-    U.zoom.value = (0.002 + b.delta * 0.01) * f60;
-    U.rot.value = (0.0008 + st.gyro.z * 0.00015) * f60;
-    U.smear.value = (0.001 + b.theta * 0.006) * Math.min(f60, 3);
-    U.glitch.value = Math.min(0.9, b.beta * 0.12 + this.flash * 0.7);
-    U.rain.value = 0.06 + b.gamma * 0.25;
-    U.shift.value = 0.0012 + b.beta * 0.004 + this.flash * 0.02;
-    this.bloomNode.strength.value = 0.5 + b.gamma + this.flash * 1.5;
 
+    // (4) bands + per-channel = SECONDARY texture detail only (small coefficients)
+    st.ch.forEach((c, i) => { let m = 0; for (const k in c) m = Math.max(m, c[k]); this.attrVecs[i].w = 0.15 + m * 0.5; });
+    U.size.value = 0.02 + b.delta * 0.02;                  // particle grain, secondary
+    U.freq.value = 0.3 + b.theta * 0.5 + F * 0.3;          // noise detail, mostly secondary
+    U.rain.value = 0.05 + b.gamma * 0.2;                   // data-rain density, secondary
+    U.smear.value = (0.001 + b.theta * 0.004) * Math.min(dt * 60, 3);
+
+    // (2) FOCUS → turbulence + glitch row-tear + RGB shift + sparks/bloom (low=smooth, high=energetic)
+    U.turb.value = 0.5 + F * 2.6 + b.gamma * 0.3;
+    U.glitch.value = Math.min(0.9, F * 0.5 + this.flash * 0.7);
+    U.shift.value = 0.0012 + F * 0.004 + this.flash * 0.02;
+
+    // (1) RELAX → palette/mood + trail length + laminar flow (drag). mood=1 → calm cyan/violet, 0 → hot amber/magenta
+    U.mood.value += (R - U.mood.value) * Math.min(1, dt * 1.5);
+    U.drag.value = 0.95 + R * 0.045;                       // more drag = laminar when calm
+    const f60 = dt * 60;                                   // feedback params are per-60fps-frame; scale for real dt
+    U.decay.value = Math.pow(0.84 + R * 0.14, f60);        // longer trails when calm
+
+    // (3) HEARTBEAT → forward motion: feedback-zoom surge (drift between beats) + radial pressure + brightness
+    U.zoom.value = (0.0015 + b.delta * 0.004 + this.beat * 0.025) * f60;
+    U.pulse.value = this.beat * 1.1;                        // radial pressure pulse through the particle field
+    U.beat.value = this.beat;                              // capped brightness swell in post
+    U.rot.value = (0.0008 + st.gyro.z * 0.00015) * f60;
+    this.bloomNode.strength.value = 0.5 + F * 0.9 + this.beat * 1.2 + this.flash * 1.5;
+
+    // head tilt AIMS where new paint is emitted (clear, screen-scale steer); gyro keeps subtle rotation
+    U.aim.value.set(st.tilt.x * 2.3, st.tilt.y * 2.3, st.tilt.x * 0.4);
     this.group.rotation.y += dt * (0.05 + st.gyro.y * 0.002);
-    this.group.rotation.x += (st.tilt.y * 0.6 - this.group.rotation.x) * 0.05;
-    this.cam.position.x += (st.tilt.x * 1.5 - this.cam.position.x) * 0.05;
+    this.group.rotation.x += (st.tilt.y * 0.4 - this.group.rotation.x) * 0.05;
+    // beat dollies the camera forward through the accumulated paint, easing back between beats
+    const camZ = 6 - this.beat * 1.3, camX = st.tilt.x * 1.2;
+    this.cam.position.z += (camZ - this.cam.position.z) * Math.min(1, dt * 12);
+    this.cam.position.x += (camX - this.cam.position.x) * 0.05;
     this.cam.lookAt(0, 0, 0);
     if (this.rain.update(dt, b.gamma)) this.rainTex.needsUpdate = true;
 

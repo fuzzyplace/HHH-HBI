@@ -10,13 +10,18 @@
     <b class="glitch" data-t="HHH//HBI">HHH//HBI</b><span id="status">SIM</span><span id="bpm">♥ --</span><span id="batt">🔋 --</span>
   </div>
   <div id="sq" class="row"></div>
-  <div id="bars"></div>
+  <div id="meters">
+    <div class="meter"><span>RELAX</span><i id="m-relax"></i><b id="v-relax">--</b></div>
+    <div class="meter"><span>FOCUS</span><i id="m-focus"></i><b id="v-focus">--</b></div>
+  </div>
+  <div id="bars" class="dim"></div>
   <div class="row btns">
     <button id="connect">Connect Muse 2</button>
     <button id="audio">Start Audio</button>
     <button id="mode">Mode: PARTICLES</button>
     <button id="snap">Snapshot (S)</button>
     <button id="calib">Calibrate (C)</button>
+    <button id="labbtn">Signal Lab (L)</button>
     <button id="clear">Clear</button>
     <button id="hide">Hide HUD (H)</button>
   </div>
@@ -28,12 +33,17 @@
 </div>
 <div id="calov" hidden>
   <div class="calbox">
-    <b>BASELINE</b>
-    <p id="caltxt">Sit still, relax your jaw, close your eyes and breathe slowly.</p>
+    <b id="calstep">STEP 1 OF 2 · EYES OPEN</b>
+    <p id="caltxt">Look softly at one point on the screen. Stay still, jaw relaxed.</p>
     <div class="calbar"><i id="calfill"></i></div>
-    <p class="dim" id="calsub">Only clean signal counts — blinks and movement pause the timer.</p>
+    <p id="calleft" class="dim"></p>
+    <p class="dim small">Why: your brain's alpha rhythm rises when your eyes close. Measuring both states sets RELAX and FOCUS to <em>your</em> range. Blinks and movement pause the timer. With audio on, a tone marks each step.</p>
     <button id="calcancel">Cancel (Esc)</button>
   </div>
+</div>
+<div id="lab" hidden>
+  <div class="labhead"><b>SIGNAL LAB</b><span class="dim">eyes-closed check: close your eyes 10s — the 8–12Hz bump and RELAX should rise</span></div>
+  <canvas></canvas>
 </div>
 <script type="module" src="/src/main.js"></script>
 </body></html>

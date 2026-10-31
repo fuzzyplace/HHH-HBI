@@ -50,10 +50,11 @@ Open DevTools console first. Run `hbiDiag()` after each block and paste the outp
 | 4 | Hold a clench 6s | 1 clench, then visuals resume after ~3–4s (sustained level becomes the new normal) |
 | 5 | Nod / turn head quickly ×3 | `artifact hold` flickers; no blink/clench storm |
 | 6 | Lift one ear sensor off for 10s, then reseat | that dot goes red/amber; at most 1 event; visuals keep moving on the other channels; recovers after reseat |
-| 7 | Press C, eyes closed, still, 30s+ | overlay progress climbs (pauses on blinks); ends with "Baseline saved"; button turns green |
-| 8 | After calibration: eyes open 30s, then closed 30s | bands sit mid-range eyes closed; alpha drops with eyes open |
-| 9 | Breathe slowly 30s | ♥ BPM shows a plausible number; pulse per beat |
+| 7 | Turn audio on, press C: step 1 eyes open (look at one point), step 2 eyes closed until two rising tones | ~25s total; message reports eyes-closed alpha gain — **paste it to me** (≥3 dB = clear) |
+| 8 | Press L (Signal Lab). Eyes open 15s, then closed 15s | 8–12Hz bump rises and RELAX climbs with eyes closed; FOCUS drops |
+| 9 | Breathe slowly 30s, audio on | thump per heartbeat; forward surge in the visuals; ♥ BPM plausible |
 | 10 | Reload page | button still says Recalibrate (baseline persisted) |
+| 11 | Tilt head left/right/up/down slowly | new paint appears toward where you tilt |
 
 Optional visual checks: tilt/nod → camera drift; S → PNG snapshot; G → glitch-synth mode.
 

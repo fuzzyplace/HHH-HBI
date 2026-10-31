@@ -1,5 +1,6 @@
 import { BAND_NAMES } from './dsp/bands.js';
 import { SignalPipeline } from './dsp/pipeline.js';
+import { Lab } from './ui/lab.js';
 import { SimulatedSource } from './input/simulated.js';
 import { GpuScene } from './visuals/gpu.js';
 import { Scene } from './visuals/scene.js';
@@ -13,7 +14,8 @@ window.hbi = scene;
 const flashFn = () => scene.flash || 0;
 const synth = new Synth();
 const pipe = new SignalPipeline();
-const CAL_KEY = 'hbi.calibration.v1';   // local-only baseline (band stats + timestamp, no device IDs)
+const CAL_KEY = 'hbi.calibration.v2';   // local-only: eyes-open/closed index levels (dB) + timestamp, no device IDs
+try { localStorage.removeItem('hbi.calibration.v1'); } catch {}   // v1 (single-state z-score) no longer applies
 try { const j = JSON.parse(localStorage.getItem(CAL_KEY) || 'null'); if (j && !pipe.importCalibration(j)) localStorage.removeItem(CAL_KEY); } catch {}
 let sig = null;   // latest pipeline result
 // hardware-test readout: run hbiDiag() in DevTools and paste the JSON (signal stats only, no device IDs)
@@ -26,8 +28,10 @@ window.hbiDiag = () => {
     events: { blink: diag.blink || 0, clench: diag.clench || 0, beat: diag.beat || 0 },
     rejectedPct: diag.ticks ? Math.round((100 * diag.rejected) / diag.ticks) : 0,
     quality: Object.fromEntries(CH.map((n, i) => [n, { label: sig.quality[i].label, std: r1(sig.quality[i].std), score: r1(sig.quality[i].score) }])),
+    relax: r1(sig.relax), focus: r1(sig.focus), relaxDb: r1(sig.relaxDb), focusDb: r1(sig.focusDb),
+    bandDb: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.dB[k])])),
     bands: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.bands[k])])),
-    bpm: Math.round(sig.bpm), calibration: sig.calibration.state, artifactNow: { ...sig.artifact },
+    bpm: Math.round(sig.bpm), calibration: sig.calibration.state, calibrationResult: sig.calibration.result, artifactNow: { ...sig.artifact }, held: [...sig.held],
   };
   console.log(JSON.stringify(out, null, 2));
   return out;
@@ -40,6 +44,7 @@ const COLORS = { delta: '#8a4dff', theta: '#ff2bd6', alpha: '#00fff0', beta: '#f
 const state = {
   bands: Object.fromEntries(BAND_NAMES.map(k => [k, 0])),
   ch: Array.from({ length: 4 }, () => Object.fromEntries(BAND_NAMES.map(k => [k, 0]))),
+  relax: 0.5, focus: 0.5,   // primary drivers (0..1): calm vs activation — see docs/SIGNALS.md
   asym: 0, bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
 };
 
@@ -106,7 +111,9 @@ addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) retur
 setInterval(() => {
   const r = (sig = pipe.tick(performance.now()));
   for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
-  state.asym = r.asym; state.bpm = r.bpm;
+  state.asym = r.asym; state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
+  meter('relax', r.relax); meter('focus', r.focus);
+  lab.update(r);
   $('bpm').textContent = `♥ ${r.bpm ? Math.round(r.bpm) : '--'}`;
   for (const k of BAND_NAMES) $('b-' + k).style.width = `${Math.round(state.bands[k] * 200)}px`;
   diag.ticks++; if (r.artifact.rejected) diag.rejected++;
@@ -118,26 +125,43 @@ setInterval(() => {
   updateCalibration(r.calibration);
 }, 100);
 
-// Calibration: 30s eyes-closed rest baseline; only artifact-free windows count
+// Calibration: step 1 eyes open, step 2 eyes closed (10s clean each); a tone marks each step when audio is on
+const CAL_STEPS = {
+  open: ['STEP 1 OF 2 · EYES OPEN', 'Look softly at one point on the screen. Stay still, jaw relaxed.'],
+  closed: ['STEP 2 OF 2 · EYES CLOSED', 'Close your eyes and relax. Two rising tones mean done — open your eyes then.'],
+};
+let calPhase = null;
 function showCalibrated() { $('calib').classList.toggle('done', pipe.calibrated); $('calib').textContent = pipe.calibrated ? 'Recalibrate (C)' : 'Calibrate (C)'; }
 function updateCalibration(c) {
-  if (c.state === 'running') $('calfill').style.width = `${Math.round(c.progress * 100)}%`;
+  if (c.state === 'running') {
+    if (c.phase !== calPhase) {
+      if (calPhase) synth.cue(1);   // open → closed
+      calPhase = c.phase; [$('calstep').textContent, $('caltxt').textContent] = CAL_STEPS[c.phase];
+    }
+    $('calfill').style.width = `${Math.round(c.phaseProgress * 100)}%`;
+    $('calleft').textContent = `about ${Math.ceil(c.phaseLeft)}s left in this step`;
+  }
   if (c.state === calWas) return;
   if (calWas === 'running' && c.state === 'done') {
     try { localStorage.setItem(CAL_KEY, JSON.stringify(pipe.exportCalibration())); } catch {}
-    msg('Baseline saved — visuals now track your own range');
+    synth.cue(2);
+    const g = c.result.alphaGainDb, gs = `${g >= 0 ? '+' : ''}${g.toFixed(1)} dB`;
+    msg(c.result.verdict === 'strong' ? `Calibrated — eyes-closed alpha ${gs}: clear signal. RELAX/FOCUS now use your range.`
+      : c.result.verdict === 'weak' ? `Calibrated — eyes-closed alpha only ${gs}: weak. Wet the ear sensors and try again for a clearer range.`
+      : `Eyes-closed alpha didn't rise (${gs}) — check ear-sensor contact, then recalibrate. Using defaults meanwhile.`);
   }
   $('calov').hidden = c.state !== 'running';
+  if (c.state !== 'running') calPhase = null;
   calWas = c.state; showCalibrated();
 }
 function startCalibration() {
   if (calWas === 'running') return;
-  $('calfill').style.width = '0%'; pipe.startCalibration(30);
+  $('calfill').style.width = '0%'; pipe.startCalibration({ open: 10, closed: 10 });
   if (source === window.sim) msg('Calibrating on SIM — connect the Muse for a real baseline');
 }
 // settle UI state here so the next tick doesn't read a cancelled run as "finished"
 function settleCalibration(text) {
-  calWas = pipe.calibrated ? 'done' : 'none';
+  calWas = pipe.calibrated ? 'done' : 'none'; calPhase = null;
   $('calov').hidden = true; showCalibrated();
   msg(text + (pipe.calibrated ? ' — keeping previous baseline' : ''));
 }
@@ -147,8 +171,12 @@ function cancelCalibration() {
   settleCalibration('Calibration cancelled');
 }
 $('calib').onclick = startCalibration;
+const lab = new Lab($('lab'));
+const toggleLab = () => { $('labbtn').classList.toggle('done', lab.toggle()); };
+$('labbtn').onclick = toggleLab;
+const meter = (k, v) => { $('m-' + k).style.width = `${Math.round(v * 200)}px`; $('v-' + k).textContent = v.toFixed(2); };
 $('calcancel').onclick = cancelCalibration;
-addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'c') startCalibration(); if (e.key === 'Escape') cancelCalibration(); });
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'c') startCalibration(); if (e.key === 'l') toggleLab(); if (e.key === 'Escape') cancelCalibration(); });
 showCalibrated();
 
 // Signal quality + stream health @1Hz (scores computed in src/dsp)

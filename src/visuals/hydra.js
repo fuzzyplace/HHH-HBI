@@ -11,18 +11,20 @@ export class HydraLayer {
     const { src, noise, osc, s0, o0, o1, render } = this.h.synth;
     s0.init({ src: srcCanvas, dynamic: true });
     const b = st.bands;
+    // dominant drivers (heartbeat forward-zoom arrives through s0, which samples the GPU canvas)
+    const F = () => st.focus ?? 0.5, R = () => st.relax ?? 0.5;
     src(o0)
-      .scale(() => 1.004 + b.delta * 0.012)
+      .scale(() => 1.004 + b.delta * 0.008)                                          // delta = secondary
       .rotate(() => st.gyro.z * 0.0003)
-      .modulate(noise(() => 2 + b.theta * 6, 0.1), () => 0.002 + b.theta * 0.012)
-      .hue(() => 0.002 + b.gamma * 0.01)
-      .brightness(() => -0.015 - b.beta * 0.03)
+      .modulate(noise(() => 2 + b.theta * 3 + F() * 5, 0.1), () => 0.002 + F() * 0.012)   // focus = turbulence
+      .hue(() => 0.002 + b.gamma * 0.01)                                             // gamma = secondary
+      .brightness(() => -0.01 - R() * 0.025 - F() * 0.015)                           // relax = longer, darker trails
       .layer(src(s0).luma(0.12, 0.05))
-      .modulateScrollX(noise(() => 1 + b.beta * 30, 0.6).thresh(0.6, 0).pixelate(1, () => 24 + b.beta * 80), () => b.beta * 0.05 + flash() * 0.25)
+      .modulateScrollX(noise(() => 1 + F() * 30, 0.6).thresh(0.6, 0).pixelate(1, () => 24 + F() * 80), () => F() * 0.05 + flash() * 0.25)  // focus = glitch tear
       .out(o0);
-    src(o0).color(1, 0, 0).scrollX(() => 0.002 + b.beta * 0.006 + flash() * 0.03)
-      .add(src(o0).color(0, 1, 1).scrollX(() => -0.002 - b.beta * 0.006 - flash() * 0.03))
-      .posterize(() => 48 - b.beta * 40, 0.8)
+    src(o0).color(1, 0, 0).scrollX(() => 0.002 + F() * 0.006 + flash() * 0.03)       // focus = RGB split
+      .add(src(o0).color(0, 1, 1).scrollX(() => -0.002 - F() * 0.006 - flash() * 0.03))
+      .posterize(() => 48 - F() * 40, 0.8)
       .out(o1);
     render(o1);
     this.on = false; this.canvas.style.display = 'none';

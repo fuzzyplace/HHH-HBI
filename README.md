@@ -24,5 +24,6 @@ Static build — Vercel auto-detects Vite; `vercel.json` pins `npm run build` �
 
 ## Docs
 
+- `docs/SIGNALS.md` — what is actually measured, how reliable it is, how to verify it
 - `docs/PLAN.md` — roadmap and signal→visual/audio mapping table
 - `CLAUDE.md` and `.claude/agents/` — project rules and subagent definitions
