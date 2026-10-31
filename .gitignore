@@ -1,4 +1,21 @@
+# deps / build
 node_modules
 dist
-.DS_Store
 *.tgz
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# logs / tooling temp
+*.log
+npm-debug.log*
+vite.config.js.timestamp-*
+.claude/settings.local.json
