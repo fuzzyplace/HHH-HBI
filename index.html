@@ -9,7 +9,21 @@
 <canvas id="corbs" hidden></canvas>
 <canvas id="cink" hidden></canvas>
 <canvas id="carms" aria-hidden="true"></canvas>
+<div id="playhint" hidden role="status" aria-live="polite"></div>
 
+<div id="sessov" hidden role="status" aria-live="polite">
+  <div class="sesshead"><span id="sessphase">EYES OPEN · 1 OF 3</span><button id="sessend">End (Esc)</button></div>
+  <b id="sesscount"></b>
+  <p id="sesstxt"></p>
+  <div class="sessbar"><i id="sessfill"></i></div>
+</div>
+
+<div id="dockwrap">
+<div id="replaybar" hidden role="region" aria-label="Session playback">
+  <span id="replaylabel">Playback</span>
+  <div class="reptrack"><i id="replayfill"></i><span id="replaymarks"></span></div>
+  <button id="replaystop">Stop (Esc)</button>
+</div>
 <div id="hud" class="dock" role="region" aria-label="Controls and key">
   <div class="dock-top">
     <b class="glitch brand" data-t="HHH//HBI">HHH//HBI</b>
@@ -47,6 +61,7 @@
     <div id="meters">
       <div class="meter"><span>RELAX</span><span class="mt"><i id="m-relax"></i></span><b id="v-relax">--</b></div>
       <div class="meter"><span>FOCUS</span><span class="mt"><i id="m-focus"></i></span><b id="v-focus">--</b></div>
+      <div id="breathui" class="meter" hidden role="status" aria-live="polite"><span>SYNC</span><span class="mt"><i id="m-sync"></i></span><b id="v-sync"></b><b id="breathword"></b></div>
       <p class="mnote">ink colour = band · ink source = sensor · water motion = heartbeat</p>
     </div>
   </div>
@@ -57,10 +72,23 @@
     <button id="mute">Mute (M)</button>
     <button id="view">View: INK (V)</button>
     <button id="mode">Glitch (G)</button>
+    <button id="playbtn">Play (J)</button>
+    <button id="breathbtn">Breathe (B)</button>
+    <button id="musicbtn">Music: CHORD (N)</button>
     <button id="snap">Snapshot (S)</button>
     <button id="labbtn">Signal Lab (L)</button>
     <button id="clear">Clear</button>
     <button id="hide">Hide (H)</button>
+  </div>
+  <div class="dock-btns" id="sessbtns" role="group" aria-label="Session">
+    <span class="dim">SESSION</span>
+    <label class="sel"><span class="vh">Eyes-closed length</span><select id="medlen" title="eyes-closed length">
+      <option value="1">1 min</option><option value="3" selected>3 min</option><option value="5">5 min</option><option value="10">10 min</option>
+    </select></label>
+    <button id="session">Begin session (R)</button>
+    <button id="replay">Play back (P)</button>
+    <label class="sel"><span class="vh">Recorded sessions</span><select id="sessions" title="recorded sessions"></select></label>
+    <button id="export">Export</button><button id="delsession" title="Delete the selected session from this browser">Delete</button>
   </div>
   <div class="dock-btns" id="simbtns">
     <span class="dim">SIM</span>
@@ -72,6 +100,7 @@
     <span id="soundhint" hidden>tap anywhere to enable sound</span>
     <span id="rates" class="dim"></span>
   </div>
+</div>
 </div>
 
 <div id="calov" hidden>

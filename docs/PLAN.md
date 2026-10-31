@@ -20,6 +20,21 @@ What each signal is and how far to trust it: `docs/SIGNALS.md`. Design rule: **a
 | Blink / clench / motion artifact | events, 800ms refractory; holds (blink: forehead pair, clench/motion: all) | the held sensor's arm glitches (RGB-split ghosts, jitter, scanlines, stuttering light) and its ink pauses; motion glitches all arms; blink → small disturbance at forehead sites | band-passed noise burst |
 | Battery | % | dock | — |
 
+**v0.6 additions (INK depth + PAINT impasto):**
+- Head tilt → INK window-camera parallax (eye slides ≤1.2R, pool plane pinned 1:1 so nozzles stay on their sites; frozen when not live).
+- Heartbeat → INK 7% camera dolly breath per beat; cortex hologram scan sweep follows beatPhase × beatConf (only with a lock). PAINT impasto paint is laid only during beat flow; thickness accumulates (~0.5%/s thinning) with a lit oil sheen; Clear wipes.
+- 4 EEG sensors → INK holographic cortex under the water, lit under each sensor by its dominant-band colour × level × quality (dark when inactive / not live). Per-site band weights normalised + sharpened (level⁴) so the dominant band owns the hue; total dose unchanged.
+- Fluid velocity (from heartbeat) → suspended motes in 3 depth layers drift only with the water.
+- Bands → PAINT particle pigment share ∝ band level²; dabs snap to band pigments.
+- Changed: relax no longer sets the PAINT palette mood (it still drives trails and drag).
+
+**v0.7 additions (PLAY / BREATHE / harmony visuals):**
+- `play` + `head` → INK stylus arm follows the head and stirs (velocity along its motion ∝ speed, dead zone 0.04 R/s, cap 3 R/s, faint dominant-band dye trail). Runs without a pulse lock (it's the user's real motion); motion glitch suppressed in PLAY, held sensors still glitch and pause.
+- Blink / clench in PLAY (deliberately not gated on the pulse lock — like head stirring, they're the user's real movements; still only while Live) → ink drop from both forehead nozzles / 8-spoke ripple from the cortex centre + cortex flash; sounds: drop "plink" / low ripple swell.
+- `breath.level` → injector nozzles slide out up to 0.32 R at empty lungs (ink follows; pump pinned so the heart pulse stays at its sensor); cortex swells 6% and brightens; guide ring 1.22–1.56 R.
+- `harmony` → gold trim, "good" lights warm toward gold (red/amber stay honest), gold cortex rim + guide ring, champagne-gold thread TP9→AF7→AF8→TP10 every 16s (needs pulse lock), gold mote shimmer above 0.8.
+- GROOVE: tempo = heart × 1.5 or × 2 (nearest 122, sticky, glide ≤0.06 BPM per 16th), heartbeats nudge the grid 20% toward the nearest 8th; kick ∝ conf with sidechain on bass/pad/chord; delta → bass, theta → pad, alpha → pluck density, beta → open hats, gamma → 16th hats, focus → claps + bass cutoff, relax → delay wet; breath → noise wash; harmony → root bass, bell plucks, shimmer pad. Chord bed at 0.45× underneath; no thump in groove (the kick is the heart).
+
 (Removed in v0.5: left/right asymmetry → stereo pan — it would smear the binaural pairs.)
 
 Calibration cues: one soft tone at step 1→2, two rising tones at the end (audio on).
@@ -39,6 +54,17 @@ Calibration cues: one soft tone at step 1→2, two rising tones at the end (audi
 
 UI: one bottom-centre dock (status, steps, sensor map, band key, relax/focus, controls). H hides it for immersive mode. M mutes; sound starts on the first click/key.
 
+## Guided sessions + playback (`src/session/`)
+- **Begin session (R)** (only when Live; length 1/3/5/10 min): eyes open 30s → eyes closed N min → eyes open 30s. A falling 5…1 countdown (one tone per second, G-A-C-D-E pentatonic descending) leads into eyes closed; a low bell marks it. In the last 5s of eyes closed, rising tones count 1…5, then a two-note chime means open your eyes. Banner top-centre (dims while eyes are closed); Esc ends early.
+- **Recording**: the derived `state` stream (bands, per-channel bands/quality/holds, relax, focus, heart, tilt/gyro, readiness, eyes-open/closed phase, alpha dB) at 20Hz + beat/blink events. No raw samples, no device IDs. Saved in this browser only (IndexedDB `hbi/sessions`, newest 8); **Export** downloads JSON on click; **Delete** removes the selected session.
+- **Summary** after a session: eyes-closed vs eyes-open relax, alpha dB difference, heart rate (live seconds only).
+- **Play back (P)**: the recording drives the current view and the sound exactly as live (beats, artifacts, arm lights); replay bar shows progress with open/closed markers. Esc/P stops.
+
+## Modes (all need Live; each toggles independently)
+- **PLAY (J)** — head movement becomes an instrument instead of noise. Head orientation = gyro integrated with a 6s leak to centre (yaw assumed gyro z, pitch gyro x; 3°/s dead zone; 60° ≈ full range). INK: a stylus arm follows your head and stirs the water; blink → ink drops from the forehead nozzles (+ liquid "plink"); jaw clench → ripple from the cortex (+ low swell). Sensor ink still pauses during holds (honest data), but motion no longer glitches the arms. In **playback**, head turn scrubs time (centre 1×, right up to +4×, left rewinds up to −4×), a quick nod (>90°/s) pauses/resumes.
+- **BREATHE (B)** — the arms reach in and draw back at 5.5 breaths/min (inhale = first half). Heart rate naturally rises on the in-breath and falls on the out-breath; `src/dsp/sync.js` measures how much of your real beat-to-beat heart-rate variation (last 64s, ≥30s needed) follows the guide's rhythm (lock-in, detrended, noise floor removed, swings <1.5 bpm discounted) → **SYNC 0..1**. Sync >0.45 with a pulse lock grows **harmony** (τ 8s up, 4s down): gold trim and cortex, a gold thread of ink weaving between the sensors, and the groove resolves. Wellness feedback, not a medical measure.
+- **Music (N)** — CHORD (binaural band chord) or GROOVE (heart-locked tech house; see `src/audio/groove.js`). Remembered per browser (`hbi.music`).
+
 ## Visual stack
 three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles in curl-ish noise flow, respawning at the tilt-aimed emitter + 4 electrode attractors → ping-pong feedback buffer (painting memory, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. Data-rain glyph layer. Hydra glitch mode (G) reads relax/focus. 2D fallback (scene.js) follows the same mapping in simplified form.
 
@@ -48,6 +74,8 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 3. **Signal quality (done)** — artifact rejection, per-channel quality.
 3c. **Heart + calm views (done — awaiting real-headband check)** — PPG on all 3 channels (was ambient-only), autocorrelation heart tracker + beat clock pacing everything, audible thump, SPRAY + ORBS views.
 3d. **INK + binaural (done — awaiting real-headband check)** — readiness gate, fluid ink view with cyborg injector arms, binaural band chord on by default + mute, bottom dock, beat-only motion everywhere.
+3e. **Sessions + depth (done — awaiting real-headband check)** — guided open/closed session with countdown tones, recording + playback + export, INK colour/depth, PAINT impasto.
+3f. **Play + groove + breathe (done — awaiting real-headband check)** — PLAY mode (head stirs / scrubs), artifacts as instruments, heart-locked GROOVE, BREATHE with heart-rhythm sync and gold harmony.
 3b. **Signal truth (done)** — dB smoothing, relax/focus indices, two-step calibration, Signal Lab (L), docs/SIGNALS.md, heartbeat motion + thump.
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, granular textures, generative melody from alpha/theta (audio-designer).

@@ -5,6 +5,9 @@ import { SimulatedSource } from './input/simulated.js';
 import { GpuScene } from './visuals/gpu.js';
 import { Scene } from './visuals/scene.js';
 import { Synth } from './audio/synth.js';
+import { Recorder, Replayer, saveSession, listSessions, exportSession, deleteSession } from './session/recorder.js';
+import { SessionGuide } from './session/guide.js';
+import { BreathSync } from './dsp/sync.js';
 
 const $ = id => document.getElementById(id);
 let scene, hydra = null, hydraSnap = false;
@@ -46,6 +49,10 @@ async function setView(v) {
 const nextView = () => setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
 window.hbiViews = () => ({ view, cur, views, state });   // console/debug handle (no signal data beyond the state object)
 const synth = new Synth();
+// guided sessions + recording/replay (declared before useSim(): swapTo ends a running session)
+const rec = new Recorder(), guide = new SessionGuide(), gv = {}, repEvents = [];
+let replay = null, sessionList = [], sourceLabel = 'SIM';
+const liveGyro = { x: 0, y: 0, z: 0 };   // PLAY reads the headset, never the recording
 window.hbiSynth = synth;
 const pipe = new SignalPipeline();
 const CAL_KEY = 'hbi.calibration.v2';   // local-only: eyes-open/closed index levels (dB) + timestamp, no device IDs
@@ -66,7 +73,7 @@ window.hbiDiag = () => {
     relax: r1(sig.relax), focus: r1(sig.focus), relaxDb: r1(sig.relaxDb), focusDb: r1(sig.focusDb),
     bandDb: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.dB[k])])),
     bands: Object.fromEntries(BAND_NAMES.map(k => [k, r1(sig.bands[k])])),
-    bpm: Math.round(sig.bpm), heartLock: r1(sig.beatConf), heartSource: sig.heartSource,
+    bpm: Math.round(sig.bpm), heartLock: r1(sig.beatConf), heartSource: sig.heartSource, modes: { play: state.play, breath: state.breath.on, music: state.music }, sync: r1(state.sync), harmony: r1(state.harmony), head: { x: r1(state.head.x), y: r1(state.head.y) },
     calibration: sig.calibration.state, calibrationResult: sig.calibration.result, artifactNow: { ...sig.artifact }, held: [...sig.held],
   };
   console.log(JSON.stringify(out, null, 2));
@@ -86,6 +93,11 @@ const state = {
   relax: 0.5, focus: 0.5,   // primary drivers (0..1): calm vs activation — see docs/SIGNALS.md
   beatPhase: 0, beatConf: 0, // heart clock: 0..1 through the current beat, lock confidence — only real beats move anything
   bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
+  // PLAY: head orientation (integrated gyro, leaky) stirs the art; artifacts become instruments
+  play: false, head: { x: 0, y: 0 },
+  // BREATHE: machine breath guide (~5.5/min) and how well the heart rhythm follows it
+  breath: { on: false, phase: 0, level: 0 }, sync: 0, harmony: 0,
+  music: 'chord',
 };
 
 const msg = t => ($('msg').textContent = t);
@@ -99,8 +111,8 @@ function wire(src) {
   const live = fn => d => { if (source === src) fn(d); };
   src.on('eeg', live(({ ch, samples }) => { pipe.push(ch, samples); if (ch === 0) { rate.eeg += samples.length; lastEeg = performance.now(); } }));
   src.on('ppg', live(({ ch, samples }) => { pipe.pushPpg(ch, samples); if (ch === 1) rate.ppg += samples.length; }));   // all 3 channels: 0 is ambient light, the pulse is on 1/2
-  src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
-  src.on('gyro', live(g => { pipe.pushMotion('gyro', g); state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
+  src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); if (replay) return; state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
+  src.on('gyro', live(g => { liveGyro.x = g.x; liveGyro.y = g.y; liveGyro.z = g.z; pipe.pushMotion('gyro', g); if (replay) return; state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
   src.on('battery', live(p => { state.battery = p; $('batt').textContent = `🔋 ${Math.round(p)}%`; }));
   src.on('reconnecting', live(({ attempt, max }) => { msg(`Muse signal lost — reconnecting (${attempt}/${max})`); setStatus('MUSE 2 · RECONNECTING'); }));
   src.on('reconnected', live(() => { msg('Muse 2 reconnected'); setStatus('MUSE 2'); }));
@@ -117,7 +129,9 @@ function swapTo(src, label) {
   sessionCal = false; lastEeg = 0;   // every new source re-syncs: contact check + calibration before anything moves
   state.battery = null; $('batt').textContent = '🔋 --';
   $('simbtns').hidden = label !== 'SIM';
-  setStatus(label);
+  if (guide.on) finishSession(`Session ended — switched to ${label}`);
+  if (replay) stopReplay();
+  sourceLabel = label; setStatus(label);
 }
 function useSim() { const s = (window.sim = new SimulatedSource()); wire(s); swapTo(s, 'SIM'); s.start(); }
 useSim();
@@ -141,7 +155,7 @@ try { muted = localStorage.getItem('hbi.muted') === '1'; } catch {}
 const showMute = () => { $('mute').textContent = muted ? 'Unmute (M)' : 'Mute (M)'; $('mute').classList.toggle('done', muted); };
 async function startAudio() {
   if (synth.ctx) return;
-  await synth.start(); synth.setMuted(muted);
+  await synth.start(); synth.setMuted(muted); synth.setMusic?.(state.music);
   $('soundhint').hidden = true;
 }
 $('soundhint').hidden = false;
@@ -176,6 +190,12 @@ addEventListener('keydown', e => {
   if (e.key === 'v') nextView();
   if (e.key === 'm') toggleMute();
   if (e.key === 'Enter') reuseBaseline();
+  if (e.key === 'r') toggleSession();
+  if (e.key === 'j') togglePlay();
+  if (e.key === 'b') toggleBreath();
+  if (e.key === 'n') toggleMusic();
+  if (e.key === 'p') toggleReplay();
+  if (e.key === 'Escape') { if (guide.on) finishSession('Session ended early'); else if (replay) stopReplay('Playback stopped'); }
 });
 
 // Readiness: idle (no stream) → contact (fit the headband) → uncalibrated → live
@@ -208,42 +228,145 @@ const QCLASS = { good: 'q-good', noisy: 'q-noisy', 'no contact': 'q-bad', railed
 const pct = v => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
 const meter = (k, v) => { $('m-' + k).style.width = pct(v); $('v-' + k).textContent = v.toFixed(2); };
 
-// DSP @20Hz (heart clock resolution ≈50ms) — all signal math lives in src/dsp; main only consumes the result
+// DSP @20Hz (heart clock resolution ≈50ms) — all signal math lives in src/dsp; main only consumes the result.
+// During playback the recorded state stream replaces the live one (the headset keeps streaming underneath).
 setInterval(() => {
   const now = performance.now();
   const r = (sig = pipe.tick(now));
-  const ready = (state.ready = readiness(r, now));
-  const streaming = ready !== 'idle';
-  for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
-  for (let i = 0; i < 4; i++) {
-    state.quality[i].label = streaming ? r.quality[i].label : 'off';
-    state.quality[i].score = streaming ? r.quality[i].score : 0;
-    state.held[i] = streaming && r.held[i];
+  let events;
+  if (replay) {
+    events = replay.step(state, repEvents, replayRate());
+    beatBase = state.beatPhase; beatAt = now;
+    if (replay.done) stopReplay('Playback finished — P to play again');
+    else $('replayfill').style.width = pct(replay.progress);
+  } else {
+    events = r.events;
+    const ready = (state.ready = readiness(r, now));
+    const streaming = ready !== 'idle';
+    for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
+    for (let i = 0; i < 4; i++) {
+      state.quality[i].label = streaming ? r.quality[i].label : 'off';
+      state.quality[i].score = streaming ? r.quality[i].score : 0;
+      state.held[i] = streaming && r.held[i];
+    }
+    if (r.artifact.motion) motionUntil = now + 1000;
+    state.motion = streaming && now < motionUntil;
+    state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
+    state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = now;
+    if (state.breath.on) for (const ibi of r.ibis) breathSync.push(ibi, now / 1000, state.breath.phase);
+    lab.update(r);
+    diag.ticks++; if (r.artifact.rejected) diag.rejected++;
+    for (const e of events) diag[e] = (diag[e] || 0) + 1;
   }
-  if (r.artifact.motion) motionUntil = now + 1000;
-  state.motion = streaming && now < motionUntil;
-  state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
-  state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = now;
 
-  const live = ready === 'live';
-  meter('relax', live ? r.relax : 0); meter('focus', live ? r.focus : 0);
+  const ready = state.ready, live = ready === 'live';
+  meter('relax', live ? state.relax : 0); meter('focus', live ? state.focus : 0);
   for (const k of BAND_NAMES) $('kb-' + k).style.width = pct(live ? state.bands[k] : 0);
-  lab.update(r);
-  $('bpm').textContent = r.bpm ? `♥ ${Math.round(r.bpm)}` : r.beatConf > 0.05 ? '♥ …' : '♥ --';
-  $('bpm').title = r.heartSource ? `heart lock ${Math.round(r.beatConf * 100)}% via ${r.heartSource} PPG` : 'looking for a pulse';
-  $('step').textContent = stepText(ready, r);
+  $('bpm').textContent = state.bpm ? `♥ ${Math.round(state.bpm)}` : state.beatConf > 0.05 ? '♥ …' : '♥ --';
+  $('bpm').title = replay ? 'recorded heartbeat' : r.heartSource ? `heart lock ${Math.round(r.beatConf * 100)}% via ${r.heartSource} PPG` : 'looking for a pulse';
+  $('step').textContent = replay ? `Replaying — ${replay.phase === 'closed' ? 'eyes closed' : 'eyes open'} part` : guide.on ? 'Session running' : stepText(ready, r);
   $('step').dataset.ready = ready;
   for (let i = 0; i < 4; i++) $('s-' + CH[i]).setAttribute('class', state.held[i] ? 'q-held' : QCLASS[state.quality[i].label] || 'q-off');
 
-  diag.ticks++; if (r.artifact.rejected) diag.rejected++;
-  for (const e of r.events) {
-    diag[e] = (diag[e] || 0) + 1;
+  for (const e of events) {
     if (!live) continue;   // before sync nothing reacts — not even to real beats
-    if (e === 'beat') { const k = Math.min(1, r.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
-    else if (e === 'blink' || e === 'clench') { cur.onBlink(); synth.blink(); }   // mapping: blink/clench → disturbance + glitch, noise burst
+    if (e === 'beat') { const k = Math.min(1, state.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
+    else if (e === 'blink' || e === 'clench') {   // mapping: blink/clench → disturbance + glitch + noise burst; in PLAY they're instruments (drop / ripple)
+      cur.onBlink(e);
+      if (state.play) (e === 'blink' ? synth.drop?.() : synth.ripple?.()); else synth.blink();
+    }
   }
-  updateCalibration(r.calibration);
+  if (!replay) { updateCalibration(r.calibration); runSession(now, r, events); }
 }, 50);
+
+// Guided session: eyes open 30s → eyes closed N min → eyes open 30s, recorded for playback
+const PHASE_UI = {
+  open: ['EYES OPEN · 1 OF 3', 'Eyes open — soft gaze on the ink. Notice what it shows.', 'Close your eyes in…'],
+  closed: ['EYES CLOSED · 2 OF 3', 'Eyes closed — breathe slowly. Rising tones will bring you back.', 'Coming back… open your eyes at the chime'],
+  open2: ['EYES OPEN · 3 OF 3', 'Open your eyes — see how the ink changed.', ''],
+};
+function toggleSession() { guide.on ? finishSession('Session ended early') : beginSession(); }
+function beginSession() {
+  if (guide.on || replay) return;
+  if (state.ready !== 'live') { msg('Sync first: the dock step must read Live before a session'); return; }
+  if (calWas === 'running') return;
+  const min = +$('medlen').value || 3;
+  guide.start(min, performance.now()); rec.start({ closedMin: min, source: sourceLabel });
+  $('sessov').hidden = false; $('session').textContent = 'End session (R)'; $('session').classList.add('done');
+  msg(`Session: 30s eyes open, ${min} min eyes closed, 30s eyes open. Recording.`);
+}
+function runSession(now, r, events) {
+  if (!guide.on) return;
+  const g = guide.step(now, gv);
+  rec.push(state, events, r.dB.alpha, g.phaseIndex);
+  const [label, txt, countTxt] = PHASE_UI[g.phase];
+  $('sessphase').textContent = label;
+  $('sesstxt').textContent = g.count != null && countTxt ? countTxt : txt;
+  $('sesscount').textContent = g.count ?? '';
+  $('sessov').classList.toggle('count', g.count != null);
+  $('sessov').classList.toggle('closed', g.phase === 'closed' && g.count == null);
+  $('sessfill').style.width = pct(g.progress);
+  if (g.tone) synth.sessionTone(g.tone.kind, g.tone.n);
+  if (g.done) finishSession(null);
+}
+async function finishSession(text) {
+  if (!guide.on) return;
+  guide.stop();
+  const s = rec.stop();
+  $('sessov').hidden = true; $('session').textContent = 'Begin session (R)'; $('session').classList.remove('done');
+  if (!s || s.n < 20 * 20) { msg((text || 'Session ended') + ' — too short to save'); return; }
+  await saveSession(s); await refreshSessions(s.id);
+  msg((text ? text + '. ' : '') + summaryText(s.summary) + ' — P to play it back');
+}
+function summaryText(sm) {
+  const o = sm.open, o2 = sm.open2, c = sm.closed;
+  const openN = o.sec + o2.sec;
+  if (!c.sec || !openN) return 'Session saved';
+  const avg = k => (o[k] * o.sec + o2[k] * o2.sec) / openN;
+  const da = c.alphaDb - avg('alphaDb');
+  const hr = c.bpm && avg('bpm') ? ` · ♥ ${Math.round(c.bpm)} vs ${Math.round(avg('bpm'))}` : '';
+  return `Saved. Eyes closed vs open: relax ${c.relax.toFixed(2)} vs ${avg('relax').toFixed(2)} · alpha ${da >= 0 ? '+' : ''}${da.toFixed(1)} dB${hr}`;
+}
+
+// Playback: the saved state stream drives the current view and the sound exactly as it did live
+async function refreshSessions(selectId) {
+  sessionList = await listSessions();
+  const fmt = s => `${new Date(s.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.closedMin} min`;
+  $('sessions').innerHTML = sessionList.length ? sessionList.map(s => `<option value="${s.id}">${fmt(s)}</option>`).join('') : '<option value="">no sessions yet</option>';
+  if (selectId) $('sessions').value = selectId;
+  $('replay').disabled = $('export').disabled = $('delsession').disabled = !sessionList.length;
+}
+const selected = () => sessionList.find(s => s.id === $('sessions').value) || sessionList[0];
+function toggleReplay() { replay ? stopReplay('Playback stopped') : startReplay(selected()); }
+function startReplay(s) {
+  if (!s || guide.on || calWas === 'running') return;
+  replay = new Replayer(s); replayPaused = false;
+  if (state.play) $('playhint').textContent = 'PLAY · turn your head to scrub (left rewinds, right speeds up) · nod to pause';
+  cur.clear(); setStatus('REPLAY');
+  $('replaylabel').textContent = `Playback · ${new Date(s.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.closedMin} min eyes closed`;
+  $('replaymarks').innerHTML = s.marks.map(m => `<i class="${m.phase === 'closed' ? 'closed' : 'open'}" style="left:${(100 * m.i / s.n).toFixed(2)}%"></i>`).join('');
+  $('replayfill').style.width = '0%'; $('replaybar').hidden = false; $('replay').textContent = 'Stop (P)';
+}
+function stopReplay(text) {
+  if (!replay) return;
+  replay = null; $('replaybar').hidden = true; $('replay').textContent = 'Play back (P)';
+  state.tilt.x = state.tilt.y = 0; Object.assign(state.gyro, liveGyro);   // drop the recording's motion
+  $('playhint').textContent = 'PLAY · turn your head to stir the water · blink to drop ink · clench your jaw to send a ripple';
+  setStatus(sourceLabel);
+  if (text) msg(text);
+}
+$('session').onclick = toggleSession;
+$('sessend').onclick = () => finishSession('Session ended early');
+$('replay').onclick = toggleReplay;
+$('replaystop').onclick = () => stopReplay('Playback stopped');
+$('export').onclick = () => { const s = selected(); if (s) exportSession(s); };
+$('delsession').onclick = async () => {
+  const s = selected();
+  if (!s || replay?.s === s) return;
+  if (!confirm('Delete this saved session from this browser? This cannot be undone.')) return;
+  await deleteSession(s.id); await refreshSessions(); msg('Session deleted');
+};
+refreshSessions();
 
 // Calibration: step 1 eyes open, step 2 eyes closed (10s clean each); a tone marks each step when audio is on
 const CAL_STEPS = {
@@ -277,6 +400,7 @@ function updateCalibration(c) {
 }
 function startCalibration() {
   if (calWas === 'running') return;
+  if (replay || guide.on) { msg('Finish the session or playback before calibrating'); return; }
   if (state.ready === 'idle' || state.ready === 'contact') { msg('Get at least 3 sensors reading first (see the sensor map)'); return; }
   $('calfill').style.width = '0%'; pipe.startCalibration({ open: 10, closed: 10 });
   if (source === window.sim) msg('Calibrating on SIM — connect the Muse for a real baseline');
@@ -307,6 +431,78 @@ setInterval(() => {
   rate.eeg = rate.ppg = rate.imu = 0;
 }, 1000);
 
+// PLAY mode: turn your head to stir the water (or scrub a playback), blink to drop ink, clench to ripple.
+// Head orientation integrates the gyro (deg/s) with a slow leak back to centre; a 60° turn ≈ full range.
+const DEAD = 3, LEAK_S = 6, FULL_DEG = 60;
+let lastNod = 0, replayPaused = false;
+function updateHead(dt) {
+  const h = state.head, g = liveGyro, dz = v => (Math.abs(v) < DEAD ? 0 : v);
+  h.x = Math.max(-1, Math.min(1, h.x * Math.exp(-dt / LEAK_S) + (dz(g.z) * dt) / FULL_DEG));   // yaw: assumed gyro z (check on hardware)
+  h.y = Math.max(-1, Math.min(1, h.y * Math.exp(-dt / LEAK_S) + (dz(g.x) * dt) / FULL_DEG));   // pitch: assumed gyro x
+  // a quick nod (pitch rate spike) toggles pause during playback
+  if (state.play && replay && Math.abs(g.x) > 90 && performance.now() - lastNod > 1200) {
+    lastNod = performance.now(); replayPaused = !replayPaused; msg(replayPaused ? 'Paused — nod to resume' : 'Playing');
+  }
+}
+/** playback speed: 1× normally; in PLAY, head turn sets −4×…+4× (centre band = 1×), nod pauses */
+function replayRate() {
+  if (!state.play) return 1;
+  if (replayPaused) return 0;
+  const x = state.head.x;
+  return Math.abs(x) < 0.15 ? 1 : Math.sign(x) * (1 + 3 * (Math.abs(x) - 0.15) / 0.85);
+}
+function togglePlay() {
+  state.play = !state.play; replayPaused = false;
+  $('playbtn').classList.toggle('done', state.play);
+  $('playhint').hidden = !state.play;
+  $('playhint').textContent = replay ? 'PLAY · turn your head to scrub (left rewinds, right speeds up) · nod to pause'
+    : 'PLAY · turn your head to stir the water · blink to drop ink · clench your jaw to send a ripple';
+  msg(state.play ? 'Play mode on — your movements are now part of the art' : 'Play mode off');
+}
+$('playbtn').onclick = togglePlay;
+
+// BREATHE: the machine breathes at 5.5 breaths/min; when your heart rhythm follows it, harmony blooms
+const BREATH_HZ = 5.5 / 60;
+const breathSync = new BreathSync();
+let breath0 = 0, syncAt = 0;
+const breathUI = { word: '', sync: '', harm: false };
+function updateBreath(t, dt) {
+  const b = state.breath;
+  if (b.on) {
+    b.phase = (((t - breath0) / 1000) * BREATH_HZ) % 1;
+    b.level = b.phase < 0.5 ? (1 - Math.cos((Math.PI * b.phase) / 0.5)) / 2 : (1 + Math.cos((Math.PI * (b.phase - 0.5)) / 0.5)) / 2;
+    if (t - syncAt > 1000) { syncAt = t; state.sync = state.bpm ? breathSync.update(t / 1000) : 0; }
+  }
+  const target = b.on && state.ready === 'live' && state.bpm && state.sync > 0.45 ? 1 : 0;
+  state.harmony += (target - state.harmony) * (1 - Math.exp(-dt / (target > state.harmony ? 8 : 4)));
+  if (b.on) {   // DOM only when something visible changes
+    const word = b.phase < 0.5 ? 'breathe in' : 'breathe out', hv = state.harmony > 0.5, sv = state.sync.toFixed(2);
+    if (word !== breathUI.word) $('breathword').textContent = breathUI.word = word;
+    if (sv !== breathUI.sync) { $('m-sync').style.width = pct(state.sync); $('v-sync').textContent = breathUI.sync = sv; }
+    if (hv !== breathUI.harm) $('breathui').classList.toggle('harmony', (breathUI.harm = hv));
+  }
+}
+function toggleBreath() {
+  const b = state.breath;
+  b.on = !b.on; breath0 = performance.now(); breathSync.reset(); state.sync = 0;
+  if (!b.on) { b.level = 0; b.phase = 0; }
+  $('breathbtn').classList.toggle('done', b.on); $('breathui').hidden = !b.on;
+  msg(b.on ? 'Breathe with the machine: in as the arms reach in, out as they draw back. Sync builds after ~30s of steady pulse.' : 'Breathe mode off');
+}
+$('breathbtn').onclick = toggleBreath;
+
+// Music: CHORD (binaural band chord) or GROOVE (heart-locked tech house from your bands)
+try { state.music = localStorage.getItem('hbi.music') === 'groove' ? 'groove' : 'chord'; } catch {}
+const showMusic = () => { $('musicbtn').textContent = `Music: ${state.music.toUpperCase()} (N)`; $('musicbtn').classList.toggle('done', state.music === 'groove'); };
+function toggleMusic() {
+  state.music = state.music === 'groove' ? 'chord' : 'groove';
+  try { localStorage.setItem('hbi.music', state.music); } catch {}
+  synth.setMusic?.(state.music); showMusic();
+  msg(state.music === 'groove' ? 'Groove: your heart sets the tempo, each band plays a part (needs a pulse lock)' : 'Chord: one tone per band');
+}
+$('musicbtn').onclick = toggleMusic;
+showMusic();
+
 let savedView = 'ink';
 try { savedView = localStorage.getItem('hbi.view') || 'ink'; } catch {}
 await setView(VIEWS.includes(savedView) ? savedView : 'ink');
@@ -315,6 +511,7 @@ let prev = performance.now();
 (function loop(t) {
   const dt = Math.min(0.1, (t - prev) / 1000); prev = t;
   if (state.bpm) state.beatPhase = (beatBase + ((t - beatAt) / 1000) * (state.bpm / 60)) % 1;
+  updateHead(dt); updateBreath(t, dt);
   cur.frame(state, dt);
   if (hydra && view === 'paint' && state.ready === 'live') { hydra.tick(dt); if (hydraSnap) { hydraSnap = false; hydra.snapshot(); } }
   synth.update(state);

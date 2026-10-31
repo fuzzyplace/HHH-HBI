@@ -56,6 +56,10 @@ Open DevTools console first. Run `hbiDiag()` after each block and paste the outp
 | 9 | Sit still 30s, audio on, headband snug on forehead | ♥ shows a number within ~10s (hover: lock % and channel); a thump per beat; the view surges in time — compare with your pulse at the wrist |
 | 9b | In INK (default), watch while live | each arm injects its own colours; lift one ear sensor → that arm goes red and its ink stops; blink → forehead arms glitch; nothing moves between heartbeats except drift |
 | 9c | Press V through SPRAY → ORBS → PAINT | dominant band dominates SPRAY/ORBS; motion only on heartbeats |
+| 9d | Once Live: pick 1 min, press R. Follow the tones (eyes closed after the 5…1 countdown, open at the chime) | summary shows relax higher and alpha + dB with eyes closed — **paste it to me**; P replays it with ink + sound |
+| 9e | Press J (PLAY), turn head left/right, nod, blink, clench | stylus arm follows your head (tell me if left/right or up/down is reversed); blink drops ink; clench ripples. In playback (P) head turn scrubs, nod pauses |
+| 9f | Press B, breathe with the arms for 2 min | SYNC climbs after ~30s if your pulse is locked; gold bloom when it holds — **paste `hbiDiag()`** |
+| 9g | Press N (GROOVE) with headphones | tempo follows your heart; kicks land on heartbeats; bands shape bass/hats/arps |
 | 10 | Reload page | dark until fit is OK; step offers Enter to reuse the saved baseline |
 | 11 | Tilt head left/right/up/down slowly | new paint appears toward where you tilt |
 

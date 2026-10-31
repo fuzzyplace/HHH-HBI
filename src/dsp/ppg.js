@@ -23,15 +23,15 @@ export const PPG_CHANNEL_NAMES = ['ambient', 'infrared', 'red'];
 
 /** slope peak detector for one polarity; refractory set from the current period */
 class Edge {
-  constructor(sign) { this.sign = sign; this.ibis = new Float64Array(IBIS); this.reset(); }
-  reset() { this.env = 0; this.z1 = 0; this.z2 = 0; this.lastPeak = -Infinity; this.beats = 0; this.n = 0; this.k = 0; }
+  constructor(sign) { this.sign = sign; this.ibis = new Float64Array(IBIS); this.fresh = []; this.reset(); }
+  reset() { this.env = 0; this.z1 = 0; this.z2 = 0; this.lastPeak = -Infinity; this.beats = 0; this.n = 0; this.k = 0; this.fresh.length = 0; }
   step(slope, t, refractory) {
     const z = this.sign * slope;
     this.env = Math.max(Math.abs(z), this.env * ENV_DECAY);
     if (this.z1 > this.z2 && this.z1 >= z && this.z1 > 0.5 * this.env && this.z1 > 0) {
       const tp = t - 1 / FS, ibi = tp - this.lastPeak;
       if (ibi >= refractory) {
-        if (ibi <= 1.6) { this.ibis[this.k] = ibi; this.k = (this.k + 1) % IBIS; this.n = Math.min(IBIS, this.n + 1); }
+        if (ibi <= 1.6) { this.ibis[this.k] = ibi; this.k = (this.k + 1) % IBIS; this.n = Math.min(IBIS, this.n + 1); if (this.fresh.length < 8) this.fresh.push(ibi); }
         this.lastPeak = tp; this.beats++;
       }
     }
@@ -107,6 +107,7 @@ export class HeartTracker {
     for (const c of this.ch) c.reset();
     this.best = -1; this.edge = null; this.bestName = ''; this.seen = 0; this.acfT = 0;
     this.period = 0; this.r = 0; this.bpm = 0; this.conf = 0; this.phase = 0;
+    this.ibiOut = [];   // beat-to-beat intervals (s) detected in the last step, plausible ones only (for heart-rhythm sync)
   }
   push(ch, samples) {
     if (ch < 0 || ch >= this.ch.length) return;
@@ -138,6 +139,9 @@ export class HeartTracker {
     this.bpm = 60 / this.period;
 
     const detected = this.edge ? this.edge.beats - this.seen : 0;
+    // real intervals from the timing edge (not the smoothed clock): keep those within 25% of the period
+    this.ibiOut.length = 0;
+    for (const c of this.ch) for (const e of c.edges) { if (e === this.edge && this.conf >= 0.25) for (const ibi of e.fresh) if (Math.abs(ibi - this.period) < 0.25 * this.period) this.ibiOut.push(ibi); e.fresh.length = 0; }
     if (this.edge) this.seen = this.edge.beats;
     // phase-locked clock: each detection nudges at most ±0.08 cycle toward the beat, the clock carries it between
     this.phase += dt / this.period;

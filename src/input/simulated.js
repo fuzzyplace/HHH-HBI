@@ -62,7 +62,10 @@ export class SimulatedSource extends Emitter {
     // PPG @64Hz, shaped like muse-js raw output: 0 ambient (no pulse), 1 infrared, 2 red —
     // a large unsigned level with a small pulse that dips on each beat, plus slow drift and noise
     const np = Math.max(1, Math.round(dt * 64));
-    const bpm = 68 + 6 * Math.sin(tt * 0.05);
+    // heart rate drifts slowly and, like a real heart, rises on each in-breath and falls on the out-breath
+    // (sim breathes at ~5.5/min; the swing is larger in 'calm', so BREATHE mode can show sync on SIM)
+    const rsa = this.mode === 'calm' ? 5 : 1.2;
+    const bpm = 68 + 6 * Math.sin(tt * 0.05) + rsa * Math.sin(2 * Math.PI * (5.5 / 60) * tt);
     const ppg = [new Float32Array(np), new Float32Array(np), new Float32Array(np)];
     for (let i = 0; i < np; i++) {
       this.ppgT += (bpm / 60) / 64;

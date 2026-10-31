@@ -215,6 +215,7 @@ export class SignalPipeline {
     for (let n = this.hr.step(dt); n > 0; n--) ev.push('beat');   // clock pulses, phase-locked to detected beats
     o.beatConf = this.hr.conf; o.beatPhase = this.hr.phase; o.heartSource = this.hr.bestName;
     o.bpm = this.hr.conf >= 0.25 ? this.hr.bpm : 0;
+    o.ibis = this.hr.ibiOut;   // real beat-to-beat intervals this tick (s), for heart-rhythm sync
 
     if (live) this._update(dt);
     this._calStatus();
