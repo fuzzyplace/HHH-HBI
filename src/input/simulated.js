@@ -50,7 +50,7 @@ export class SimulatedSource extends Emitter {
         const t = tt + i / FS;
         let v = (Math.random() - 0.5) * 6;
         for (const k in F) v += AMP[k] * this.w[k] * Math.sin(6.2832 * F[k] * t + this.phase[ch][k]);
-        if (blink && (ch === 1 || ch === 2) && i < 20) v += 220 * Math.sin((i / 20) * Math.PI);
+        if (blink && (ch === 1 || ch === 2) && i < 20) v += 400 * Math.sin((i / 20) * Math.PI);
         out[i] = v;
       }
       this.emit('eeg', { ch, samples: out });

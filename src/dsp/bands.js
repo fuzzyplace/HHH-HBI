@@ -31,10 +31,27 @@ export class BandAnalyzer {
     this.buf = Array.from({ length: channels }, () => new Float32Array(N));
     this.pos = new Array(channels).fill(0);
     this.re = new Float32Array(N); this.im = new Float32Array(N);
+    this.lo = new Array(channels).fill(Infinity); this.hi = new Array(channels).fill(-Infinity);
+  }
+  /** std dev (µV) of the full window — contact/quality heuristic */
+  std(ch) {
+    const b = this.buf[ch]; let m = 0, q = 0;
+    for (let i = 0; i < N; i++) m += b[i];
+    m /= N;
+    for (let i = 0; i < N; i++) q += (b[i] - m) ** 2;
+    return Math.sqrt(q / N);
+  }
+  /** peak-to-peak since last call (catches blinks regardless of packet size/timing) */
+  p2pSince(ch) {
+    const v = this.hi[ch] - this.lo[ch]; this.lo[ch] = Infinity; this.hi[ch] = -Infinity;
+    return Number.isFinite(v) ? v : 0;
   }
   push(ch, samples) {
     const b = this.buf[ch];
-    for (let i = 0; i < samples.length; i++) { b[this.pos[ch]] = samples[i]; this.pos[ch] = (this.pos[ch] + 1) % N; }
+    for (let i = 0; i < samples.length; i++) {
+      const v = samples[i]; b[this.pos[ch]] = v; this.pos[ch] = (this.pos[ch] + 1) % N;
+      if (v < this.lo[ch]) this.lo[ch] = v; if (v > this.hi[ch]) this.hi[ch] = v;
+    }
   }
   /** peak-to-peak over last n samples (artifact/blink detection) */
   p2p(ch, n = 64) {

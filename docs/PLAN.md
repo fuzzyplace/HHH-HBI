@@ -19,9 +19,24 @@ Muse 2 → real-time cyberpunk visuals + reactive audio. User meditates art into
 | Battery | % | HUD | — |
 Canvas uses alpha trails so the piece accumulates; Snapshot = PNG download.
 
+## Visual stack (v0.2)
+three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles (262k WebGPU / 65k WebGL) in curl-ish noise flow + 4 electrode attractors → ping-pong feedback buffer (painting memory, max-blend, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. EEG-driven data-rain glyph layer. Hydra-synth glitch mode (G). Adaptive resolution when frames >24ms.
+
+| Input | GPU visual |
+|---|---|
+| delta | particle size, feedback zoom |
+| theta | noise frequency, feedback smear |
+| alpha | damping (laminar flow), trail length, calm palette (cyan→violet) |
+| beta | turbulence, glitch row-tear, RGB split |
+| gamma | sparks/bloom strength, data-rain density |
+| 4 channels | attractor strengths at TP9/AF7/AF8/TP10 positions |
+| PPG beat | radial pressure pulse |
+| blink/clench | cyan flash + RGB spike + glitch burst |
+| accel / gyro | camera drift / field rotation |
+
 ## Phases
-1. **Scaffold (done)** — Vite app, simulated source, band DSP, canvas scene, synth, snapshot, HUD.
-2. **Hardware** — muse-js connect, real PPG/motion, reconnect, battery, signal-quality (ble-integrator).
+1. **Scaffold (done)**  — Vite app, simulated source, band DSP, canvas scene, synth, snapshot, HUD.
+2. **Hardware (ready to test — see docs/HARDWARE.md)** — muse-js connect, real PPG/motion, reconnect, battery, signal-quality (ble-integrator).
 3. **Signal quality** — artifact rejection, per-user baseline calibration (30s eyes-closed), adaptive normalization (dsp-engineer).
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, binaural option, granular textures, generative melody from alpha/theta (audio-designer).
