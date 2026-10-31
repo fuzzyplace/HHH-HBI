@@ -202,7 +202,8 @@ export class Arms {
         const lab = streaming ? st.quality?.[i]?.label || 'off' : 'off';
         if (lab === 'good') a.col.copy(C_GRN);
         else if (lab === 'noisy') a.col.copy(C_AMB);
-        else if (lab === 'no contact' || lab === 'railed') { a.col.copy(C_RED); lit = blink; }
+        else if (lab === 'no contact') { a.col.copy(C_RED); lit = blink; }
+        else if (lab === 'railed') a.col.copy(C_RED);
         else { a.col.copy(C_OFF); lit = 0; }
         if (lit > 0 && dose[i] > 0.01) a.col.lerp(C_CYN, Math.min(1, dose[i] * 1.3));   // cyan flash on each dose
       } else {
@@ -210,7 +211,7 @@ export class Arms {
         a.col.copy(lock ? C_RED : C_OFF); lit = lock ? 0.12 + 0.88 * Math.min(1, dose[4]) : 0;
       }
       // ---- glitch (artifact hold → this arm; motion → all) ----
-      const gT = streaming && ((!a.pump && st.held?.[i]) || st.motion) ? 1 : 0;
+      const gT = st.ready === 'live' && ((!a.pump && st.held?.[i]) || st.motion) ? 1 : 0;
       a.glitch += (gT - a.glitch) * Math.min(1, dt * (gT ? 14 : 5));
       if (t - a.gAt > 0.05) {   // jumps at ~20Hz
         a.gAt = t; const gm = a.glitch * a.rL;

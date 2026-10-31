@@ -373,6 +373,7 @@ export class InkView {
     // ---- velocity impulses: dose jets, beat spokes, blink stir ----
     const sP = this.sP, sV = this.sV, dP = this.dP, dC = this.dC;
     let n = 0, m = 0;
+    const trickle = st.bpm > 0 ? 0.05 : 0;   // no pulse lock → no water motion at all
     const jr = (Rn * 0.06) ** 2, sr = (Rn * 0.026) ** 2;
     for (let i = 0; i < 4; i++) {
       if (!this.active[i]) continue;
@@ -381,7 +382,7 @@ export class InkView {
       const dose = this.dose[i];
       for (let b = 0; b < 5; b++) {
         const lvl = Math.pow(Math.max(0, (ch[BANDS[b]] || 0) - 0.04), 1.6) * q;   // contrast curve: dominant bands win the colour
-        const amt = lvl * (dose * 5.0 + 0.05);           // burst on beat + very faint trickle
+        const amt = lvl * (dose * 5.0 + trickle);        // burst on beat + very faint trickle (only with a heart lock)
         if (amt < 2e-4) continue;
         const a = (b - 2) * 0.36, ca = Math.cos(a), sa = Math.sin(a);
         const ux = dx * ca - dy * sa, uy = dx * sa + dy * ca;   // fanned stream direction
@@ -393,7 +394,7 @@ export class InkView {
           dC[o] = COL[b][0] * amt * dt * 3.4; dC[o + 1] = COL[b][1] * amt * dt * 3.4; dC[o + 2] = COL[b][2] * amt * dt * 3.4;
         }
         if (n < MAXS) {
-          const o = n * 4, sp = (dose * 110 + 4) * (0.4 + lvl) * dt;   // jet carries the stream inward
+          const o = n * 4, sp = (dose * 110 + 4 * trickle * 20) * (0.4 + lvl) * dt;   // jet carries the stream inward
           n++;
           sP[o] = x; sP[o + 1] = y; sP[o + 2] = jr;
           sV[o] = ux * sp; sV[o + 1] = uy * sp;

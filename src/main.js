@@ -23,14 +23,17 @@ const LOADERS = {
 };
 const views = { paint: scene };
 let view = 'paint', cur = scene;
+let loading = null;   // one view load at a time: a second V press mid-load would build a duplicate on the same canvas
 async function setView(v) {
+  if (loading) return;
   if (!views[v]) {
-    try { views[v] = await LOADERS[v](); }
+    try { loading = v; views[v] = await LOADERS[v](); }
     catch (e) {
       console.warn(e); msg(`${v.toUpperCase()} view unavailable: ${e.message}`);
-      if (v === 'ink' && view === 'paint' && !views.spray) return setView('spray');   // first load without WebGL2
+      if (v === 'ink' && view === 'paint' && !views.spray) { loading = null; return setView('spray'); }   // first load without WebGL2
       return;
     }
+    finally { if (loading === v) loading = null; }
   }
   if (v !== 'paint' && hydra?.on) { hydra.toggle(); $('mode').textContent = 'Glitch (G)'; }
   view = v; cur = views[v];
@@ -313,7 +316,7 @@ let prev = performance.now();
   const dt = Math.min(0.1, (t - prev) / 1000); prev = t;
   if (state.bpm) state.beatPhase = (beatBase + ((t - beatAt) / 1000) * (state.bpm / 60)) % 1;
   cur.frame(state, dt);
-  if (hydra && view === 'paint') { hydra.tick(dt); if (hydraSnap) { hydraSnap = false; hydra.snapshot(); } }
+  if (hydra && view === 'paint' && state.ready === 'live') { hydra.tick(dt); if (hydraSnap) { hydraSnap = false; hydra.snapshot(); } }
   synth.update(state);
   requestAnimationFrame(loop);
 })(prev);

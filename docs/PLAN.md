@@ -25,7 +25,7 @@ What each signal is and how far to trust it: `docs/SIGNALS.md`. Design rule: **a
 Calibration cues: one soft tone at step 1→2, two rising tones at the end (audio on).
 
 ### Signal pipeline (v0.4, `src/dsp/pipeline.js`)
-- `push/pushPpg/pushMotion` in, `tick()` @10Hz out (one reused result object, incl. `relax`, `focus`, `relaxDb`, `focusDb`, `dB`, `psd`, `held`).
+- `push/pushPpg/pushMotion` in, `tick()` @20Hz out (one reused result object, incl. `relax`, `focus`, `relaxDb`, `focusDb`, `dB`, `psd`, `held`).
 - Quality: σ, 50/60Hz ratio, railing → good / noisy / no contact / railed; unusable channels excluded.
 - Band power tracked in dB, smoothed τ≈2s; outputs eased τ≈0.8s. No auto-stretch: pre-calibration indices use fixed spans (relax 8dB, focus 6dB) around a 60s-slow centre.
 - Two-step calibration (10s eyes open + 10s eyes closed, clean seconds, 2s settle each) anchors the indices; reports eyes-closed alpha gain (≥3dB strong). Stored as `hbi.calibration.v2`.
