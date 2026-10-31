@@ -19,3 +19,13 @@ dist
 npm-debug.log*
 vite.config.js.timestamp-*
 .claude/settings.local.json
+
+# keys / certs (local https dev certs, never commit)
+*.pem
+*.key
+*.crt
+
+# caches / coverage
+.cache/
+coverage/
+logs/
