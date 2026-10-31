@@ -51,3 +51,17 @@ test('replay restores the state stream and every beat', () => {
   assert.equal(st.held[1], true);
   assert.ok(!JSON.stringify(Object.keys(s)).match(/device|mac|name/i), 'no device identifiers stored');
 });
+
+test('scrubbing: fast-forward fires each event once, rewind fires none, pause holds', () => {
+  const { s } = runSession(1);
+  const rp = new Replayer(s), st = mkState(), out = [];
+  let fwd = 0;
+  while (!rp.done) { rp.step(st, out, 3); fwd += out.filter(e => e === 'beat').length; }
+  assert.equal(fwd, s.events.length);
+  const back = new Replayer(s); back.pos = s.n - 1; back.ev = s.events.length;
+  let rew = 0;
+  for (let k = 0; k < 700; k++) { back.step(st, out, -4); rew += out.length; }
+  assert.equal(rew, 0); assert.equal(back.pos, 0);
+  const p = new Replayer(s); p.step(st, out, 0); p.step(st, out, 0);
+  assert.equal(p.pos, 0);
+});

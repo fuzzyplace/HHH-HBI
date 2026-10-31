@@ -7,6 +7,7 @@ import { Scene } from './visuals/scene.js';
 import { Synth } from './audio/synth.js';
 import { Recorder, Replayer, saveSession, listSessions, exportSession } from './session/recorder.js';
 import { SessionGuide } from './session/guide.js';
+import { BreathSync } from './dsp/sync.js';
 
 const $ = id => document.getElementById(id);
 let scene, hydra = null, hydraSnap = false;
@@ -91,6 +92,11 @@ const state = {
   relax: 0.5, focus: 0.5,   // primary drivers (0..1): calm vs activation — see docs/SIGNALS.md
   beatPhase: 0, beatConf: 0, // heart clock: 0..1 through the current beat, lock confidence — only real beats move anything
   bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
+  // PLAY: head orientation (integrated gyro, leaky) stirs the art; artifacts become instruments
+  play: false, head: { x: 0, y: 0 },
+  // BREATHE: machine breath guide (~5.5/min) and how well the heart rhythm follows it
+  breath: { on: false, phase: 0, level: 0 }, sync: 0, harmony: 0,
+  music: 'chord', kick: 0,
 };
 
 const msg = t => ($('msg').textContent = t);
@@ -148,7 +154,7 @@ try { muted = localStorage.getItem('hbi.muted') === '1'; } catch {}
 const showMute = () => { $('mute').textContent = muted ? 'Unmute (M)' : 'Mute (M)'; $('mute').classList.toggle('done', muted); };
 async function startAudio() {
   if (synth.ctx) return;
-  await synth.start(); synth.setMuted(muted);
+  await synth.start(); synth.setMuted(muted); synth.setMusic?.(state.music);
   $('soundhint').hidden = true;
 }
 $('soundhint').hidden = false;
@@ -184,6 +190,9 @@ addEventListener('keydown', e => {
   if (e.key === 'm') toggleMute();
   if (e.key === 'Enter') reuseBaseline();
   if (e.key === 'r') toggleSession();
+  if (e.key === 'j') togglePlay();
+  if (e.key === 'b') toggleBreath();
+  if (e.key === 'n') toggleMusic();
   if (e.key === 'p') toggleReplay();
   if (e.key === 'Escape') { if (guide.on) finishSession('Session ended early'); else if (replay) stopReplay('Playback stopped'); }
 });
@@ -225,7 +234,7 @@ setInterval(() => {
   const r = (sig = pipe.tick(now));
   let events;
   if (replay) {
-    events = replay.step(state, repEvents);
+    events = replay.step(state, repEvents, replayRate());
     beatBase = state.beatPhase; beatAt = now;
     if (replay.done) stopReplay('Playback finished — P to play again');
     else $('replayfill').style.width = pct(replay.progress);
@@ -243,6 +252,7 @@ setInterval(() => {
     state.motion = streaming && now < motionUntil;
     state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
     state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = now;
+    if (state.breath.on) for (const ibi of r.ibis) breathSync.push(ibi, now / 1000, state.breath.phase);
     lab.update(r);
     diag.ticks++; if (r.artifact.rejected) diag.rejected++;
     for (const e of events) diag[e] = (diag[e] || 0) + 1;
@@ -260,7 +270,10 @@ setInterval(() => {
   for (const e of events) {
     if (!live) continue;   // before sync nothing reacts — not even to real beats
     if (e === 'beat') { const k = Math.min(1, state.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
-    else if (e === 'blink' || e === 'clench') { cur.onBlink(); synth.blink(); }   // mapping: blink/clench → disturbance + glitch, noise burst
+    else if (e === 'blink' || e === 'clench') {   // mapping: blink/clench → disturbance + glitch + noise burst; in PLAY they're instruments (drop / ripple)
+      cur.onBlink(e);
+      if (state.play) (e === 'blink' ? synth.drop?.() : synth.ripple?.()); else synth.blink();
+    }
   }
   if (!replay) { updateCalibration(r.calibration); runSession(now, r, events); }
 }, 50);
@@ -326,7 +339,8 @@ const selected = () => sessionList.find(s => s.id === $('sessions').value) || se
 function toggleReplay() { replay ? stopReplay('Playback stopped') : startReplay(selected()); }
 function startReplay(s) {
   if (!s || guide.on || calWas === 'running') return;
-  replay = new Replayer(s);
+  replay = new Replayer(s); replayPaused = false;
+  if (state.play) $('playhint').textContent = 'PLAY · turn your head to scrub (left rewinds, right speeds up) · nod to pause';
   cur.clear(); setStatus('REPLAY');
   $('replaylabel').textContent = `Playback · ${new Date(s.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.closedMin} min eyes closed`;
   $('replaymarks').innerHTML = s.marks.map(m => `<i class="${m.phase === 'closed' ? 'closed' : 'open'}" style="left:${(100 * m.i / s.n).toFixed(2)}%"></i>`).join('');
@@ -408,6 +422,77 @@ setInterval(() => {
   rate.eeg = rate.ppg = rate.imu = 0;
 }, 1000);
 
+// PLAY mode: turn your head to stir the water (or scrub a playback), blink to drop ink, clench to ripple.
+// Head orientation integrates the gyro (deg/s) with a slow leak back to centre; a 60° turn ≈ full range.
+const DEAD = 3, LEAK_S = 6, FULL_DEG = 60;
+let lastNod = 0, replayPaused = false;
+function updateHead(dt) {
+  const h = state.head, g = state.gyro, dz = v => (Math.abs(v) < DEAD ? 0 : v);
+  h.x = Math.max(-1, Math.min(1, h.x * Math.exp(-dt / LEAK_S) + (dz(g.z) * dt) / FULL_DEG));   // yaw: assumed gyro z (check on hardware)
+  h.y = Math.max(-1, Math.min(1, h.y * Math.exp(-dt / LEAK_S) + (dz(g.x) * dt) / FULL_DEG));   // pitch: assumed gyro x
+  // a quick nod (pitch rate spike) toggles pause during playback
+  if (state.play && replay && Math.abs(g.x) > 90 && performance.now() - lastNod > 1200) {
+    lastNod = performance.now(); replayPaused = !replayPaused; msg(replayPaused ? 'Paused — nod to resume' : 'Playing');
+  }
+}
+/** playback speed: 1× normally; in PLAY, head turn sets −4×…+4× (centre band = 1×), nod pauses */
+function replayRate() {
+  if (!state.play) return 1;
+  if (replayPaused) return 0;
+  const x = state.head.x;
+  return Math.abs(x) < 0.15 ? 1 : Math.sign(x) * (1 + 3 * (Math.abs(x) - 0.15) / 0.85);
+}
+function togglePlay() {
+  state.play = !state.play; replayPaused = false;
+  $('playbtn').classList.toggle('done', state.play);
+  $('playhint').hidden = !state.play;
+  $('playhint').textContent = replay ? 'PLAY · turn your head to scrub (left rewinds, right speeds up) · nod to pause'
+    : 'PLAY · turn your head to stir the water · blink to drop ink · clench your jaw to send a ripple';
+  msg(state.play ? 'Play mode on — your movements are now part of the art' : 'Play mode off');
+}
+$('playbtn').onclick = togglePlay;
+
+// BREATHE: the machine breathes at 5.5 breaths/min; when your heart rhythm follows it, harmony blooms
+const BREATH_HZ = 5.5 / 60;
+const breathSync = new BreathSync();
+let breath0 = 0, syncAt = 0;
+function updateBreath(t, dt) {
+  const b = state.breath;
+  if (b.on) {
+    b.phase = (((t - breath0) / 1000) * BREATH_HZ) % 1;
+    b.level = b.phase < 0.5 ? (1 - Math.cos((Math.PI * b.phase) / 0.5)) / 2 : (1 + Math.cos((Math.PI * (b.phase - 0.5)) / 0.5)) / 2;
+    if (t - syncAt > 1000) { syncAt = t; state.sync = state.bpm ? breathSync.update(t / 1000) : 0; }
+  }
+  const target = b.on && state.ready === 'live' && state.bpm && state.sync > 0.45 ? 1 : 0;
+  state.harmony += (target - state.harmony) * (1 - Math.exp(-dt / (target > state.harmony ? 8 : 4)));
+  if (b.on) {
+    $('breathword').textContent = b.phase < 0.5 ? 'breathe in' : 'breathe out';
+    $('m-sync').style.width = pct(state.sync); $('v-sync').textContent = state.sync.toFixed(2);
+    $('breathui').classList.toggle('harmony', state.harmony > 0.5);
+  }
+}
+function toggleBreath() {
+  const b = state.breath;
+  b.on = !b.on; breath0 = performance.now(); breathSync.reset(); state.sync = 0;
+  if (!b.on) { b.level = 0; b.phase = 0; }
+  $('breathbtn').classList.toggle('done', b.on); $('breathui').hidden = !b.on;
+  msg(b.on ? 'Breathe with the machine: in as the arms reach in, out as they draw back. Sync builds after ~30s of steady pulse.' : 'Breathe mode off');
+}
+$('breathbtn').onclick = toggleBreath;
+
+// Music: CHORD (binaural band chord) or GROOVE (heart-locked tech house from your bands)
+try { state.music = localStorage.getItem('hbi.music') === 'groove' ? 'groove' : 'chord'; } catch {}
+const showMusic = () => { $('musicbtn').textContent = `Music: ${state.music.toUpperCase()} (N)`; $('musicbtn').classList.toggle('done', state.music === 'groove'); };
+function toggleMusic() {
+  state.music = state.music === 'groove' ? 'chord' : 'groove';
+  try { localStorage.setItem('hbi.music', state.music); } catch {}
+  synth.setMusic?.(state.music); showMusic();
+  msg(state.music === 'groove' ? 'Groove: your heart sets the tempo, each band plays a part (needs a pulse lock)' : 'Chord: one tone per band');
+}
+$('musicbtn').onclick = toggleMusic;
+synth.onKick = d => setTimeout(() => { state.kick = 1; }, Math.max(0, d * 1000));
+showMusic();
+
 let savedView = 'ink';
 try { savedView = localStorage.getItem('hbi.view') || 'ink'; } catch {}
 await setView(VIEWS.includes(savedView) ? savedView : 'ink');
@@ -416,6 +501,8 @@ let prev = performance.now();
 (function loop(t) {
   const dt = Math.min(0.1, (t - prev) / 1000); prev = t;
   if (state.bpm) state.beatPhase = (beatBase + ((t - beatAt) / 1000) * (state.bpm / 60)) % 1;
+  updateHead(dt); updateBreath(t, dt);
+  state.kick *= Math.exp(-dt / 0.12);
   cur.frame(state, dt);
   if (hydra && view === 'paint' && state.ready === 'live') { hydra.tick(dt); if (hydraSnap) { hydraSnap = false; hydra.snapshot(); } }
   synth.update(state);

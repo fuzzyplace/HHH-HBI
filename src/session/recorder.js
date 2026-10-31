@@ -70,16 +70,18 @@ export function summarize(s) {
   return out;
 }
 
-/** plays a session back into the shared state object, one frame per DSP tick */
+/** plays a session back into the shared state object; rate 1 = one frame per DSP tick, 0 = paused, <0 = rewind */
 export class Replayer {
-  constructor(s) { this.s = s; this.i = 0; this.ev = 0; this.done = false; }
-  get progress() { return this.s.n ? this.i / this.s.n : 1; }
-  /** fill st from the next frame; returns events for that frame */
-  step(st, out) {
+  constructor(s) { this.s = s; this.pos = 0; this.ev = 0; this.done = false; this.phase = 'open'; }
+  get i() { return Math.floor(this.pos); }
+  get progress() { return this.s.n ? this.pos / this.s.n : 1; }
+  /** fill st from the current frame, then advance by rate; returns events crossed going forward */
+  step(st, out, rate = 1) {
     out.length = 0;
     const s = this.s;
-    if (this.i >= s.n) { this.done = true; return out; }
-    const f = s.frames, o = this.i * s.fw;
+    if (this.pos >= s.n) { this.done = true; return out; }
+    const fi = Math.max(0, Math.min(s.n - 1, Math.floor(this.pos)));
+    const f = s.frames, o = fi * s.fw;
     BANDS.forEach((b, k) => { st.bands[b] = f[o + O.bands + k]; for (let i = 0; i < 4; i++) st.ch[i][b] = f[o + O.ch + i * 5 + k]; });
     for (let i = 0; i < 4; i++) {
       st.quality[i].score = f[o + O.qs + i]; st.quality[i].label = LABELS[f[o + O.ql + i]] || 'off'; st.held[i] = f[o + O.held + i] > 0;
@@ -90,11 +92,16 @@ export class Replayer {
     st.gyro.x = f[o + O.gyro]; st.gyro.y = f[o + O.gyro + 1]; st.gyro.z = f[o + O.gyro + 2];
     st.ready = READY[f[o + O.ready]] || 'idle';
     this.phase = PHASES[f[o + O.sess]];
-    while (this.ev < s.events.length && s.events[this.ev][0] <= this.i) out.push(s.events[this.ev++][1]);
-    this.i++;
+    const next = Math.max(0, this.pos + rate);
+    if (rate > 0) {   // fire the events this step passes over (scrubbing forward fast fires them all, in order)
+      while (this.ev < s.events.length && s.events[this.ev][0] < Math.floor(next)) { if (s.events[this.ev][0] >= fi) out.push(s.events[this.ev][1]); this.ev++; }
+    } else if (rate < 0) {   // rewinding: move the event cursor back silently
+      while (this.ev > 0 && s.events[this.ev - 1][0] >= Math.floor(next)) this.ev--;
+    }
+    this.pos = next;
+    if (this.pos >= s.n) this.done = true;
     return out;
   }
-  reset() { this.i = 0; this.ev = 0; this.done = false; }
 }
 
 // ---- storage (IndexedDB; failures degrade to in-memory for this tab) ----
