@@ -91,6 +91,7 @@ button.done:hover{background:var(--gn);color:var(--bg)}
 #msg{color:var(--am)}
 #soundhint{color:var(--mg);animation:hint 2.4s ease-in-out infinite}
 #rates{font-size:10px}
+#privacy{font-size:10px;cursor:help}
 @keyframes hint{50%{opacity:.45}}
 
 /* brand glitch */

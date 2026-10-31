@@ -6,7 +6,8 @@ export class HydraLayer {
   constructor(srcCanvas, st, flash) {
     this.canvas = Object.assign(document.createElement('canvas'), { id: 'hydra' });
     this.canvas.width = Math.floor(innerWidth * 0.75); this.canvas.height = Math.floor(innerHeight * 0.75);
-    document.body.insertBefore(this.canvas, document.getElementById('hud'));
+    const dock = document.getElementById('dockwrap') || document.getElementById('hud');   // under the dock
+    dock.parentNode.insertBefore(this.canvas, dock);
     this.h = new Hydra({ canvas: this.canvas, autoLoop: false, makeGlobal: false, detectAudio: false, width: this.canvas.width, height: this.canvas.height });
     const { src, noise, osc, s0, o0, o1, render } = this.h.synth;
     s0.init({ src: srcCanvas, dynamic: true });

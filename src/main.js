@@ -8,6 +8,8 @@ import { Synth } from './audio/synth.js';
 import { Recorder, Replayer, saveSession, listSessions, exportSession, deleteSession } from './session/recorder.js';
 import { SessionGuide } from './session/guide.js';
 import { BreathSync } from './dsp/sync.js';
+import { initTelemetry, track, trackOnce } from './telemetry.js';
+initTelemetry();
 
 const $ = id => document.getElementById(id);
 let scene, hydra = null, hydraSnap = false;
@@ -39,6 +41,7 @@ async function setView(v) {
     finally { if (loading === v) loading = null; }
   }
   if (v !== 'paint' && hydra?.on) { hydra.toggle(); $('mode').textContent = 'Glitch (G)'; }
+  if (v !== view) track('view', { v });
   view = v; cur = views[v];
   for (const k of VIEWS) for (const id of VIEW_CANVAS[k]) $(id).hidden = k !== v;
   cur.resize?.();
@@ -140,12 +143,17 @@ let connecting = false;
 $('connect').onclick = async () => {
   if (connecting) return;
   connecting = true; $('connect').disabled = true; msg('Pick your Muse in the Chrome dialog…');
+  track('connect_attempt');
   try {
     const { MuseSource } = await import('./input/muse.js');
     const m = new MuseSource(); wire(m);
     await m.start();                      // SIM keeps streaming until the headset is actually streaming
-    window.sim = null; swapTo(m, 'MUSE 2'); msg(`${m.deviceName || 'Muse 2'} connected — check the sensor map, then calibrate`);
-  } catch (e) { msg('Connect failed: ' + e.message + ' — staying on SIM'); }
+    window.sim = null; swapTo(m, 'MUSE 2'); track('connect_ok'); msg(`${m.deviceName || 'Muse 2'} connected — check the sensor map, then calibrate`);
+  } catch (e) {
+    const m = e.message || '';   // coarse reason only
+    track('connect_fail', { reason: /unavailable/i.test(m) ? 'no_web_bluetooth' : /off/i.test(m) ? 'bt_off' : /No device/.test(m) ? 'cancelled' : /blocked/i.test(m) ? 'blocked' : /cancel/i.test(m) ? 'aborted' : 'other' });
+    msg('Connect failed: ' + e.message + ' — staying on SIM');
+  }
   finally { connecting = false; $('connect').disabled = false; }
 };
 
@@ -156,6 +164,7 @@ const showMute = () => { $('mute').textContent = muted ? 'Unmute (M)' : 'Mute (M
 async function startAudio() {
   if (synth.ctx) return;
   await synth.start(); synth.setMuted(muted); synth.setMusic?.(state.music);
+  track('audio_start', { muted });
   $('soundhint').hidden = true;
 }
 $('soundhint').hidden = false;
@@ -168,7 +177,7 @@ function toggleMute() {
 $('mute').onclick = toggleMute;
 showMute();
 
-const snap = () => (hydra?.on ? (hydraSnap = true) : cur.snapshot());
+const snap = () => { track('snapshot', { view }); return hydra?.on ? (hydraSnap = true) : cur.snapshot(); };
 $('snap').onclick = snap;
 const toggleMode = async () => {
   if (view !== 'paint') await setView('paint');   // the glitch synth layers over the PAINT view only
@@ -242,6 +251,7 @@ setInterval(() => {
   } else {
     events = r.events;
     const ready = (state.ready = readiness(r, now));
+    if (ready === 'live') trackOnce('live:' + sourceLabel, 'live', { source: sourceLabel, secs: Math.round(now / 1000) });
     const streaming = ready !== 'idle';
     for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
     for (let i = 0; i < 4; i++) {
@@ -291,6 +301,7 @@ function beginSession() {
   if (state.ready !== 'live') { msg('Sync first: the dock step must read Live before a session'); return; }
   if (calWas === 'running') return;
   const min = +$('medlen').value || 3;
+  track('session_start', { min, source: sourceLabel });
   guide.start(min, performance.now()); rec.start({ closedMin: min, source: sourceLabel });
   $('sessov').hidden = false; $('session').textContent = 'End session (R)'; $('session').classList.add('done');
   msg(`Session: 30s eyes open, ${min} min eyes closed, 30s eyes open. Recording.`);
@@ -314,6 +325,7 @@ async function finishSession(text) {
   guide.stop();
   const s = rec.stop();
   $('sessov').hidden = true; $('session').textContent = 'Begin session (R)'; $('session').classList.remove('done');
+  track('session_end', { saved: !!s && s.n >= 400, early: !!text, min: s ? Math.round(s.n / 20 / 6) / 10 : 0 });
   if (!s || s.n < 20 * 20) { msg((text || 'Session ended') + ' — too short to save'); return; }
   await saveSession(s); await refreshSessions(s.id);
   msg((text ? text + '. ' : '') + summaryText(s.summary) + ' — P to play it back');
@@ -341,6 +353,7 @@ function toggleReplay() { replay ? stopReplay('Playback stopped') : startReplay(
 function startReplay(s) {
   if (!s || guide.on || calWas === 'running') return;
   replay = new Replayer(s); replayPaused = false;
+  track('replay', { play: state.play });
   if (state.play) $('playhint').textContent = 'PLAY · turn your head to scrub (left rewinds, right speeds up) · nod to pause';
   cur.clear(); setStatus('REPLAY');
   $('replaylabel').textContent = `Playback · ${new Date(s.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.closedMin} min eyes closed`;
@@ -359,12 +372,12 @@ $('session').onclick = toggleSession;
 $('sessend').onclick = () => finishSession('Session ended early');
 $('replay').onclick = toggleReplay;
 $('replaystop').onclick = () => stopReplay('Playback stopped');
-$('export').onclick = () => { const s = selected(); if (s) exportSession(s); };
+$('export').onclick = () => { const s = selected(); if (s) { exportSession(s); track('export'); } };
 $('delsession').onclick = async () => {
   const s = selected();
   if (!s || replay?.s === s) return;
   if (!confirm('Delete this saved session from this browser? This cannot be undone.')) return;
-  await deleteSession(s.id); await refreshSessions(); msg('Session deleted');
+  await deleteSession(s.id); await refreshSessions(); msg('Session deleted'); track('session_delete');
 };
 refreshSessions();
 
@@ -389,6 +402,7 @@ function updateCalibration(c) {
     try { localStorage.setItem(CAL_KEY, JSON.stringify(pipe.exportCalibration())); } catch {}
     sessionCal = true;
     synth.cue(2);
+    track('calibrated', { verdict: c.result.verdict, source: sourceLabel });
     const g = c.result.alphaGainDb, gs = `${g >= 0 ? '+' : ''}${g.toFixed(1)} dB`;
     msg(c.result.verdict === 'strong' ? `Calibrated — eyes-closed alpha ${gs}: clear signal. You're live.`
       : c.result.verdict === 'weak' ? `Calibrated — eyes-closed alpha only ${gs}: weak. Wet the ear sensors and recalibrate for a clearer range.`
@@ -457,6 +471,7 @@ function togglePlay() {
   $('playhint').hidden = !state.play;
   $('playhint').textContent = replay ? 'PLAY · turn your head to scrub (left rewinds, right speeds up) · nod to pause'
     : 'PLAY · turn your head to stir the water · blink to drop ink · clench your jaw to send a ripple';
+  track('mode', { mode: 'play', on: state.play });
   msg(state.play ? 'Play mode on — your movements are now part of the art' : 'Play mode off');
 }
 $('playbtn').onclick = togglePlay;
@@ -479,13 +494,14 @@ function updateBreath(t, dt) {
     const word = b.phase < 0.5 ? 'breathe in' : 'breathe out', hv = state.harmony > 0.5, sv = state.sync.toFixed(2);
     if (word !== breathUI.word) $('breathword').textContent = breathUI.word = word;
     if (sv !== breathUI.sync) { $('m-sync').style.width = pct(state.sync); $('v-sync').textContent = breathUI.sync = sv; }
-    if (hv !== breathUI.harm) $('breathui').classList.toggle('harmony', (breathUI.harm = hv));
+    if (hv !== breathUI.harm) { $('breathui').classList.toggle('harmony', (breathUI.harm = hv)); if (hv) track('harmony', { secs: Math.round((t - breath0) / 1000) }); }
   }
 }
 function toggleBreath() {
   const b = state.breath;
   b.on = !b.on; breath0 = performance.now(); breathSync.reset(); state.sync = 0;
   if (!b.on) { b.level = 0; b.phase = 0; }
+  track('mode', { mode: 'breathe', on: b.on });
   $('breathbtn').classList.toggle('done', b.on); $('breathui').hidden = !b.on;
   msg(b.on ? 'Breathe with the machine: in as the arms reach in, out as they draw back. Sync builds after ~30s of steady pulse.' : 'Breathe mode off');
 }
@@ -498,6 +514,7 @@ function toggleMusic() {
   state.music = state.music === 'groove' ? 'chord' : 'groove';
   try { localStorage.setItem('hbi.music', state.music); } catch {}
   synth.setMusic?.(state.music); showMusic();
+  track('mode', { mode: 'music', v: state.music });
   msg(state.music === 'groove' ? 'Groove: your heart sets the tempo, each band plays a part (needs a pulse lock)' : 'Chord: one tone per band');
 }
 $('musicbtn').onclick = toggleMusic;
