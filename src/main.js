@@ -32,27 +32,42 @@ $('bars').innerHTML = BAND_NAMES.map(k => `<div class="bar"><span>${k}</span><i 
 const msg = t => ($('msg').textContent = t);
 
 let source = null;
-function attach(src, label) {
-  source?.stop();
-  source = src;
-  norm = new Normalizer(); chNorm = Array.from({ length: 4 }, () => new Normalizer());   // re-learn ranges per source
-  src.on('eeg', ({ ch, samples }) => { analyzer.push(ch, samples); if (ch === 0) rate.eeg += samples.length; });
-  src.on('ppg', ({ ch, samples }) => { if (ch === 0) { hr.push(samples); rate.ppg += samples.length; } });
-  src.on('accel', a => { rate.imu++; state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; });
-  src.on('gyro', g => { state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; });
-  src.on('battery', p => { state.battery = p; $('batt').textContent = `🔋 ${Math.round(p)}%`; });
-  src.on('disconnect', () => { msg('Muse disconnected — back to SIM'); useSim(); });
-  src.start();
-  $('status').textContent = label + (scene?.webgpu ? ' · WebGPU' : scene?.renderer ? ' · WebGL2' : '');
+const setStatus = label => ($('status').textContent = label + (scene?.webgpu ? ' · WebGPU' : scene?.renderer ? ' · WebGL2' : ''));
+// handlers ignore events from any source that isn't the live one (e.g. a Muse still connecting while SIM runs)
+function wire(src) {
+  const live = fn => d => { if (source === src) fn(d); };
+  src.on('eeg', live(({ ch, samples }) => { analyzer.push(ch, samples); if (ch === 0) rate.eeg += samples.length; }));
+  src.on('ppg', live(({ ch, samples }) => { if (ch === 0) { hr.push(samples); rate.ppg += samples.length; } }));
+  src.on('accel', live(a => { rate.imu++; state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
+  src.on('gyro', live(g => { state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
+  src.on('battery', live(p => { state.battery = p; $('batt').textContent = `🔋 ${Math.round(p)}%`; }));
+  src.on('reconnecting', live(({ attempt, max }) => { msg(`Muse signal lost — reconnecting (${attempt}/${max})`); setStatus('MUSE 2 · RECONNECTING'); }));
+  src.on('reconnected', live(() => { msg('Muse 2 reconnected'); setStatus('MUSE 2'); }));
+  src.on('error', live(({ message }) => msg('Muse: ' + message)));
+  src.on('disconnect', live(() => { msg('Muse disconnected — back to SIM'); useSim(); }));
 }
-function useSim() { attach(window.sim = new SimulatedSource(), 'SIM'); }
+function swapTo(src, label) {
+  const prev = source;
+  source = src;
+  prev?.stop();
+  norm = new Normalizer(); chNorm = Array.from({ length: 4 }, () => new Normalizer());   // re-learn ranges per source
+  state.battery = null; $('batt').textContent = '🔋 --';
+  setStatus(label);
+}
+function useSim() { const s = (window.sim = new SimulatedSource()); wire(s); swapTo(s, 'SIM'); s.start(); }
 useSim();
 
+let connecting = false;
 $('connect').onclick = async () => {
+  if (connecting) return;
+  connecting = true; $('connect').disabled = true; msg('Pick your Muse in the Chrome dialog…');
   try {
     const { MuseSource } = await import('./input/muse.js');
-    const m = new MuseSource(); await m.start(); attach(m, 'MUSE 2'); msg('Muse 2 connected');
-  } catch (e) { msg('Connect failed: ' + e.message); }
+    const m = new MuseSource(); wire(m);
+    await m.start();                      // SIM keeps painting until the headset is actually streaming
+    window.sim = null; swapTo(m, 'MUSE 2'); msg(`${m.deviceName || 'Muse 2'} connected`);
+  } catch (e) { msg('Connect failed: ' + e.message + ' — staying on SIM'); }
+  finally { connecting = false; $('connect').disabled = false; }
 };
 $('audio').onclick = async () => { await synth.start(); $('audio').textContent = 'Audio ON'; };
 const snap = () => (hydra?.on ? (hydraSnap = true) : scene.snapshot());
