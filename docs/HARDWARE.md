@@ -52,7 +52,8 @@ Open DevTools console first. Run `hbiDiag()` after each block and paste the outp
 | 6 | Lift one ear sensor off for 10s, then reseat | that dot goes red/amber; at most 1 event; visuals keep moving on the other channels; recovers after reseat |
 | 7 | Turn audio on, press C: step 1 eyes open (look at one point), step 2 eyes closed until two rising tones | ~25s total; message reports eyes-closed alpha gain — **paste it to me** (≥3 dB = clear) |
 | 8 | Press L (Signal Lab). Eyes open 15s, then closed 15s | 8–12Hz bump rises and RELAX climbs with eyes closed; FOCUS drops |
-| 9 | Breathe slowly 30s, audio on | thump per heartbeat; forward surge in the visuals; ♥ BPM plausible |
+| 9 | Sit still 30s, audio on, headband snug on forehead | ♥ shows a number within ~10s (hover: lock % and channel); a thump per beat; the view surges in time — compare with your pulse at the wrist |
+| 9b | Press V through SPRAY → ORBS → PAINT | dominant band dominates SPRAY/ORBS; motion paced by your heart |
 | 10 | Reload page | button still says Recalibrate (baseline persisted) |
 | 11 | Tilt head left/right/up/down slowly | new paint appears toward where you tilt |
 

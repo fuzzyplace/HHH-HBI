@@ -18,6 +18,11 @@ export class Synth {
     this.bus.connect(this.dry).connect(this.pan);
     this.bus.connect(this.verb).connect(this.wet).connect(this.pan);
     this.pan.connect(this.comp).connect(this.master).connect(ctx.destination);
+    // drone sub-bus: all sustained voices feed this, so a beat can sidechain-duck the
+    // drone bed (droneBus.gain dip) WITHOUT touching the heartbeat thump, which taps
+    // this.bus directly. droneBus.gain is the duck target (1 = nominal).
+    this.droneBus = ctx.createGain(); this.droneBus.gain.value = 1;
+    this.droneBus.connect(this.bus);
 
     this.voices = {};
     const mk = (name, type, freq, filt) => {
@@ -26,7 +31,7 @@ export class Synth {
       let node = o;
       let f = null;
       if (filt) { f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = filt; o.connect(f); node = f; }
-      node.connect(g); g.connect(this.bus); o.start();
+      node.connect(g); g.connect(this.droneBus); o.start();
       this.voices[name] = { o, g, f };
       return { o, g, f };
     };
@@ -67,32 +72,67 @@ export class Synth {
     this.set(V.delta.g.gain, 0.05 + 0.35 * b.delta - 0.04 * relax, 0.4); // relax → softer drone
     this.set(this.pan.pan, clamp(s.asym * 2, -0.8, 0.8), 0.4);
   }
-  // one heartbeat pulse at time t0, scaled by amp: deep body + soft low-mid knock
+  // one heartbeat pulse at time t0, scaled by amp. Three layers so it reads on BOTH
+  // tiny laptop/phone speakers and headphones:
+  //   1. sub body (~55→48Hz sine)  — felt weight on headphones/subs
+  //   2. mid body (~140→70Hz tri + soft 2nd harmonic) — the audible "thump" on laptops,
+  //      which reproduce almost nothing below ~150Hz
+  //   3. transient click (~1.5kHz bandpass noise, ~3ms) — attack definition, low level
+  // All envelopes ramp (no hard onset); every node is stopped + disconnected via onended.
   thump(t0, amp) {
-    const ctx = this.ctx;
-    // deep warm body: triangle pitch-drop ~58 → 45 Hz
-    const o = ctx.createOscillator(), bg = ctx.createGain();
-    o.type = 'triangle';
-    o.frequency.setValueAtTime(58, t0); o.frequency.exponentialRampToValueAtTime(45, t0 + 0.09);
-    bg.gain.setValueAtTime(0, t0);
-    bg.gain.linearRampToValueAtTime(0.30 * amp, t0 + 0.005);        // ~5ms attack
-    bg.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.23);        // ~230ms decay
-    o.connect(bg).connect(this.bus); o.start(t0); o.stop(t0 + 0.26);
-    o.onended = () => bg.disconnect();
-    // soft low-mid knock for definition on laptop speakers: lowpassed noise burst
+    const ctx = this.ctx, bus = this.bus;
+    // 1. sub body: sine pitch-drop ~55 → 48 Hz
+    const sub = ctx.createOscillator(), sg = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(55, t0); sub.frequency.exponentialRampToValueAtTime(48, t0 + 0.08);
+    sg.gain.setValueAtTime(0, t0);
+    sg.gain.linearRampToValueAtTime(0.26 * amp, t0 + 0.006);        // ~6ms attack
+    sg.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.22);        // ~220ms decay
+    sub.connect(sg).connect(bus); sub.start(t0); sub.stop(t0 + 0.25);
+    sub.onended = () => sg.disconnect();
+    // 2a. mid body: triangle pitch-drop ~140 → 70 Hz — carries the thump on laptop speakers
+    const mid = ctx.createOscillator(), mg = ctx.createGain();
+    mid.type = 'triangle';
+    mid.frequency.setValueAtTime(140, t0); mid.frequency.exponentialRampToValueAtTime(70, t0 + 0.07);
+    mg.gain.setValueAtTime(0, t0);
+    mg.gain.linearRampToValueAtTime(0.22 * amp, t0 + 0.005);
+    mg.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.17);        // ~170ms decay
+    mid.connect(mg).connect(bus); mid.start(t0); mid.stop(t0 + 0.2);
+    mid.onended = () => mg.disconnect();
+    // 2b. soft 2nd harmonic (~280 → 140 Hz) — adds presence without harshness
+    const h2 = ctx.createOscillator(), hg = ctx.createGain();
+    h2.type = 'sine';
+    h2.frequency.setValueAtTime(280, t0); h2.frequency.exponentialRampToValueAtTime(140, t0 + 0.07);
+    hg.gain.setValueAtTime(0, t0);
+    hg.gain.linearRampToValueAtTime(0.08 * amp, t0 + 0.005);
+    hg.gain.exponentialRampToValueAtTime(0.0006, t0 + 0.11);        // ~110ms decay
+    h2.connect(hg).connect(bus); h2.start(t0); h2.stop(t0 + 0.14);
+    h2.onended = () => hg.disconnect();
+    // 3. transient click: short bandpassed-noise around 1.5kHz for attack definition
     const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), kg = ctx.createGain();
-    src.buffer = this.noiseBuf; f.type = 'lowpass'; f.frequency.value = 200; f.Q.value = 0.7;
+    src.buffer = this.noiseBuf; f.type = 'bandpass'; f.frequency.value = 1500; f.Q.value = 1.0;
     kg.gain.setValueAtTime(0, t0);
-    kg.gain.linearRampToValueAtTime(0.11 * amp, t0 + 0.004);
-    kg.gain.exponentialRampToValueAtTime(0.0006, t0 + 0.07);
-    src.connect(f).connect(kg).connect(this.bus); src.start(t0); src.stop(t0 + 0.1);
+    kg.gain.linearRampToValueAtTime(0.05 * amp, t0 + 0.0015);       // ~1.5ms attack
+    kg.gain.exponentialRampToValueAtTime(0.0004, t0 + 0.028);       // ~26ms decay → ~3ms perceived click
+    src.connect(f).connect(kg).connect(bus); src.start(t0); src.stop(t0 + 0.05);
     src.onended = () => { f.disconnect(); kg.disconnect(); };
   }
-  beat() {
+  // briefly duck the drone bed so the heartbeat cuts through (sidechain feel): ~3.5dB dip
+  // for ~150ms, all via setTargetAtTime. Only touches droneBus — never the thump.
+  duck(t0) {
+    const g = this.droneBus.gain;
+    g.cancelScheduledValues(t0);
+    g.setTargetAtTime(0.66, t0, 0.02);           // dip ~3.5dB, fast
+    g.setTargetAtTime(1.0, t0 + 0.15, 0.08);     // recover over ~150ms+
+  }
+  beat(strength = 1) {
     if (!this.ctx) return;
+    const amp = clamp(strength);
+    if (amp <= 0) return;                         // strength 0 → play nothing
     const t = this.ctx.currentTime;
-    this.thump(t, 1.0);              // lub
-    this.thump(t + 0.12, 0.55);      // softer dub (~120ms later)
+    this.duck(t);                                 // sidechain the drone once per beat
+    this.thump(t, amp);                           // lub (full)
+    this.thump(t + 0.13, amp * 0.6);              // dub (~0.6×, +130ms)
   }
   /** soft sine bell for eyes-closed guidance (calibration step changes); n tones, rising */
   cue(n = 1) {

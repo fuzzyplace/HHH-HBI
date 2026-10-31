@@ -40,3 +40,7 @@ button:hover{background:var(--cy);color:var(--bg)}
 #lab{background:rgba(5,0,15,.94)}
 @media (max-width:1000px){#lab{top:auto;bottom:12px;left:12px;right:12px;display:flex;flex-direction:column;align-items:center}#lab canvas{width:auto!important;height:auto!important;max-width:100%;max-height:min(360px,48vh)}.labhead{align-self:stretch}}
 #lab canvas{position:static;inset:auto}
+canvas[hidden]{display:none}
+#bpm{display:inline-block;transition:transform .25s ease-out,text-shadow .25s}
+#bpm.beat{animation:hb .35s ease-out}
+@keyframes hb{0%{transform:scale(1.35);color:#ff3b6b;text-shadow:0 0 10px #ff3b6b}100%{transform:scale(1)}}
