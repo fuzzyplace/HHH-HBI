@@ -2,6 +2,9 @@
 
 Static Vite build (`dist/`), no server. `vercel.json` sets the build, caching and security headers.
 
+**Live:** https://hhh-hbi.vercel.app (team `stdclub`, project `hhh-hbi`, Hobby plan).
+Deploy: `vercel deploy --prod` from the repo (linked via `.vercel/`, gitignored).
+
 ## Hosting
 - `npm ci && npm run build`; output `dist/`. Hashed `/assets/*` cached 1 year (immutable); `index.html` always revalidates.
 - HTTPS everywhere, which Web Bluetooth needs (secure context).
@@ -18,7 +21,7 @@ Static Vite build (`dist/`), no server. `vercel.json` sets the build, caching an
 `src/telemetry.js`, production only, cookieless:
 - **Vercel Web Analytics**: page views, referrers, countries, devices, browsers (query strings stripped).
 - **Vercel Speed Insights**: real-user Core Web Vitals (LCP, INP, CLS, TTFB).
-- **Custom events** (need Vercel Pro; ignored on Hobby): coarse product facts only.
+- **Custom events**: coarse product facts only. **Need Vercel Pro**: on the current Hobby plan they are sent but not shown in the dashboard.
 
 | Event | Props | Answers |
 |---|---|---|
@@ -38,7 +41,7 @@ Never sent: EEG/PPG values, bands, heart rate, session contents, device names/ID
 Guard: each event ≤20 per page load, ≤150 total. Opt-out: GPC, Do Not Track, or `localStorage.hbi.notrack = '1'`.
 
 ## Dashboard (vercel.com → project)
-- **Analytics** tab → Enable Web Analytics. **Speed Insights** tab → Enable.
+- Web Analytics and Speed Insights: enabled (verified via API on first deploy).
 - **Firewall**: enable Bot Protection (managed), keep DDoS mitigation on; Attack Challenge Mode if under attack.
 - **Settings → Spend Management**: set a cap/alerts (bandwidth abuse on a static site).
 - **Settings → Git**: connect `fuzzyplace/HHH-HBI` → push to `main` deploys production, branches get preview URLs.
