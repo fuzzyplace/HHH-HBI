@@ -16,6 +16,7 @@
     <button id="audio">Start Audio</button>
     <button id="mode">Mode: PARTICLES</button>
     <button id="snap">Snapshot (S)</button>
+    <button id="calib">Calibrate (C)</button>
     <button id="clear">Clear</button>
     <button id="hide">Hide HUD (H)</button>
   </div>
@@ -24,6 +25,15 @@
     <button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button>
   </div>
   <div id="msg"></div>
+</div>
+<div id="calov" hidden>
+  <div class="calbox">
+    <b>BASELINE</b>
+    <p id="caltxt">Sit still, relax your jaw, close your eyes and breathe slowly.</p>
+    <div class="calbar"><i id="calfill"></i></div>
+    <p class="dim" id="calsub">Only clean signal counts — blinks and movement pause the timer.</p>
+    <button id="calcancel">Cancel (Esc)</button>
+  </div>
 </div>
 <script type="module" src="/src/main.js"></script>
 </body></html>

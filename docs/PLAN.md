@@ -15,9 +15,15 @@ Muse 2 → real-time cyberpunk visuals + reactive audio. User meditates art into
 | PPG | BPM + beats | ring pulse on beat | soft kick on beat |
 | Accelerometer | head tilt | parallax offset of field | filter tilt |
 | Gyroscope | angular rate | field rotation | — |
-| Blink / jaw clench (AF7/AF8 spike) | event | chromatic flash + glitch | noise burst |
+| Blink (AF7/AF8 p2p > max(150µV, 1.6× baseline)) / jaw clench (TP9+TP10 30–44Hz power > 4× clean baseline) | event (800ms refractory) | chromatic flash + glitch | noise burst |
 | Battery | % | HUD | — |
 Canvas uses alpha trails so the piece accumulates; Snapshot = PNG download.
+
+### Signal pipeline (v0.3, `src/dsp/pipeline.js`)
+- All signal math behind `SignalPipeline`: `push/pushPpg/pushMotion` in, `tick()` @10Hz out (one reused result object).
+- Quality per channel: σ (<1.5µV no contact, score falls 60→150µV), 50/60Hz line-noise ratio, railing (≥5% samples at ±990µV). Labels good / noisy / no contact / railed; no-contact & railed channels are left out of the averages.
+- Artifact rejection: blink, clench, or motion (gyro >45°/s, accel jump >0.25g) holds band outputs for 1s (one FFT window).
+- Normalization: adaptive min/max until calibrated; after a 30s eyes-closed baseline (clean seconds only), bands map as `0.5 + z/5` (±2.5σ → 0..1) with a ~3-min drift of the baseline mean. Baseline stored in localStorage (`hbi.calibration.v1`, band stats only).
 
 ## Visual stack (v0.2)
 three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles (262k WebGPU / 65k WebGL) in curl-ish noise flow + 4 electrode attractors → ping-pong feedback buffer (painting memory, max-blend, zoom/rotate/smear, glitch row-tear) → bloom → RGB shift → scanlines/vignette/grain. EEG-driven data-rain glyph layer. Hydra-synth glitch mode (G). Adaptive resolution when frames >24ms.
@@ -37,7 +43,7 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 ## Phases
 1. **Scaffold (done)**  — Vite app, simulated source, band DSP, canvas scene, synth, snapshot, HUD.
 2. **Hardware (code done, awaiting real-headband test — see docs/HARDWARE.md)** — chooser/timeout/cancel errors, auto-reconnect w/ backoff (5 tries) without reopening chooser, SIM keeps running until Muse streams, fallback to SIM on give-up, battery, device name in HUD (ble-integrator).
-3. **Signal quality** — artifact rejection, per-user baseline calibration (30s eyes-closed), adaptive normalization (dsp-engineer).
+3. **Signal quality (done — real-headband tuning pending)** — artifact rejection, per-channel quality, 30s eyes-closed baseline calibration with local persistence, adaptive normalization fallback (dsp-engineer).
 4. **Art depth** — WebGL/shader layer, palette themes, brush modes, session recording to video/GIF (visual-artist).
 5. **Sound depth** — scales/modes, binaural option, granular textures, generative melody from alpha/theta (audio-designer).
 6. **Polish & share** — snapshot gallery, session export (JSON + PNG), install as PWA, H.H.H. branding (qa-reviewer + all).
@@ -53,5 +59,5 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 - Web app via Chrome Web Bluetooth (not native/Electron), deployed as a static site on Vercel. Fallback later: Mind Monitor OSC bridge.
 - Muse 2 only (not Muse S / Athena).
 - Plain JS, no framework, Canvas2D first; WebGL in phase 4.
-- Relative band power with adaptive min/max normalization is "good enough" until calibration lands.
+- Calibration is a single eyes-closed rest baseline (not eyes-open + eyes-closed). Thresholds are tuned on the simulator and need real-headband tuning.
 - Local-only, no data leaves the browser.
