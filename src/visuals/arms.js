@@ -16,10 +16,16 @@ import * as THREE from 'three';
 // so needle tips (z=0) align exactly with the fluid's site coordinates. The camera is a "window" rig shared
 // with ink.js: it may slide (head tilt) and dolly (real beats only), always with an off-axis frustum that keeps
 // the z=0 rectangle pinned to the viewport — off-plane parts parallax, the tips never leave their sites.
+// PLAY: a sixth magenta/white "stylus" arm from the lower-left holds its tip on the head-steered stylus point
+// (fx.sx/sy from ink.js, which stirs at exactly that point); retracted + hidden outside PLAY. Motion glitch is
+// suppressed in PLAY (motion is intentional); held-sensor glitch stays (honest data).
+// BREATHE: the four injector tips retract along their inward line by fx.bOff (ink.js injects at the same offset
+// nozzle), a thin guide ring around the head breathes with fx.level; harmony (fx.gold) warms trim + lights gold.
 
 const FOV = 30;
 const C_OFF = new THREE.Color(0x07080a), C_RED = new THREE.Color(0xff2244), C_AMB = new THREE.Color(0xffb000);
 const C_GRN = new THREE.Color(0x00ff9c), C_CYN = new THREE.Color(0x00fff0);
+const C_TRIM = new THREE.Color(0x00c8d8), C_GOLD = new THREE.Color(0xffc45a), C_MAG = new THREE.Color(0xff2bd6), C_WHT = new THREE.Color(0xffffff);
 const UP_Y = new THREE.Vector3(0, 1, 0), AX_Z = new THREE.Vector3(0, 0, 1), AX_X = new THREE.Vector3(1, 0, 0);
 
 function haloTexture() {
@@ -84,15 +90,16 @@ export class Arms {
     this.ghostMatC = new THREE.MeshBasicMaterial({ color: 0x00fff0, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false });
 
     this.arms = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
+      const sty = i === 5;
       const u = { uGlitch: { value: 0 }, uTime: { value: 0 } };
-      const metal = glitchMat({ color: 0x2c323b, metalness: 0.9, roughness: 0.33, envMapIntensity: 0.9 }, u);
+      const metal = glitchMat({ color: sty ? 0x3a3f48 : 0x2c323b, metalness: 0.9, roughness: sty ? 0.25 : 0.33, envMapIntensity: 0.9 }, u);
       const rubber = glitchMat({ color: 0x0a0c0f, metalness: 0.15, roughness: 0.65 }, u);
-      const trim = glitchMat({ color: 0x050607, metalness: 0.4, roughness: 0.4, emissive: 0x00c8d8, emissiveIntensity: 0.3 }, u);
+      const trim = glitchMat({ color: 0x050607, metalness: 0.4, roughness: 0.4, emissive: sty ? 0xff2bd6 : 0x00c8d8, emissiveIntensity: 0.3 }, u);
       const led = new THREE.MeshBasicMaterial({ color: 0x07080a, toneMapped: false });
       const nozLed = new THREE.MeshBasicMaterial({ color: 0x07080a, toneMapped: false });
-      const mk = (geo, mat, ghost = true) => {
-        const m = new THREE.Mesh(geo, mat); m.matrixAutoUpdate = true; this.scene.add(m);
+      const mk = (geo, mat, ghost = !sty) => {
+        const m = new THREE.Mesh(geo, mat); m.matrixAutoUpdate = true; m.visible = !sty; this.scene.add(m);
         return { m, ghost };
       };
       const p = {
@@ -105,6 +112,7 @@ export class Arms {
       };
       const hRing = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo, color: 0x000000, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
       const hNoz = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo, color: 0x000000, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+      hRing.visible = hNoz.visible = !sty;
       this.scene.add(hRing, hNoz);
       // ghost copies for the RGB-split glitch (hidden unless that arm is glitching)
       const ghosts = [];
@@ -116,10 +124,18 @@ export class Arms {
       this.arms.push({
         u, metal, trim, led, nozLed, p, hRing, hNoz, ghosts, glitch: 0, gx: 0, gy: 0, gAt: 0, stutter: 1,
         base: new THREE.Vector3(), tip: new THREE.Vector3(), inward: new THREE.Vector3(), lat: new THREE.Vector3(),
-        L1: 1, L2: 1, rL: 10, hh: 20, nl: 20, plT: 1, plA: 0, pump: i === 4,
+        L1: 1, L2: 1, rL: 10, hh: 20, nl: 20, plT: 1, plA: 0, pump: i === 4, sty, shown: !sty,
         col: new THREE.Color(), lvl: 0,
       });
     }
+    // BREATHE guide ring around the head (z=0, so it sits on the pool plane): thin core + soft wide glow
+    this.ringMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    this.ringGlowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    this.guide = new THREE.Mesh(new THREE.TorusGeometry(1, 0.0045, 6, 160), this.ringMat);
+    this.guideGlow = new THREE.Mesh(new THREE.TorusGeometry(1, 0.022, 6, 160), this.ringGlowMat);
+    this.guide.visible = this.guideGlow.visible = false; this.guide.renderOrder = this.guideGlow.renderOrder = 1;
+    this.scene.add(this.guide, this.guideGlow);
+    this.cTmp = new THREE.Color();
     // scratch vectors (no per-frame allocation)
     this.v = Array.from({ length: 12 }, () => new THREE.Vector3());
     this.q = new THREE.Quaternion();
@@ -178,6 +194,23 @@ export class Arms {
       if (a.lat.dot(out) < 0) a.lat.negate();
       if (i === 4) a.lat.set(1, 0, 0);
     }
+    { // PLAY stylus: rises from below the dock, right of centre; links long enough to reach the whole stylus range unlocked
+      const a = this.arms[5];
+      W(Math.min(w + R * 0.2, head.x + R * 1.9), h + R * 0.35, R * 0.8, a.base);
+      W(head.x, head.y, 0, a.tip);
+      a.rL = R * 0.06; a.hh = R * 0.1; a.nl = R * 0.14;
+      let maxD = 1;
+      for (let k = 0; k < 4; k++) {
+        W(head.x + (k & 1 ? 1.15 : -1.15) * head.rx, head.y + (k & 2 ? 1.15 : -1.15) * head.ry, a.hh + a.nl, this.v[0]);
+        maxD = Math.max(maxD, this.v[0].distanceTo(a.base));
+      }
+      a.L1 = maxD * 0.55; a.L2 = maxD * 0.52;
+      const dir = this.v[1].subVectors(a.tip, a.base).setZ(0).normalize();
+      a.lat.set(-dir.y, dir.x, 0); if (a.lat.x < 0) a.lat.negate();   // elbow leans right, away from the head
+      a.inward.copy(dir);
+      this.guide.position.set(head.x - w / 2, h / 2 - head.y, 0);
+      this.guideGlow.position.copy(this.guide.position);
+    }
   }
 
   onBeat(s, active) {
@@ -198,7 +231,9 @@ export class Arms {
     c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
   }
 
-  frame(st, dt, dose, active, cam) {
+  /** fx (from ink.js, reused object): { sOn 0..1, sx, sy (stylus tip, CSS px), bOff (breath nozzle retraction, CSS px),
+   *  ring 0..1 (breath guide on), level 0..1 (lungs), gold 0..1 (harmony) }. Absent/zero fx = the pre-PLAY/BREATHE pose. */
+  frame(st, dt, dose, active, cam, fx) {
     if (!this.sites) return;
     this._rig(cam);
     this.t += dt;
@@ -206,12 +241,21 @@ export class Arms {
     this.wake += ((live ? 1 : 0) - this.wake) * Math.min(1, dt * 1.6);
     const streaming = st.ready && st.ready !== 'idle';
     const blink = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 0.8));   // slow red blink
+    const gold = fx ? fx.gold : 0, bOff = fx ? fx.bOff : 0, sOn = fx ? fx.sOn : 0;
+    this._guide(fx, t);
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const a = this.arms[i], p = a.p;
+      if (a.sty) {   // PLAY stylus: hidden + skipped entirely when off
+        const show = sOn > 0;
+        if (show !== a.shown) { a.shown = show; for (const k in p) p[k].m.visible = show; a.hRing.visible = a.hNoz.visible = show; }
+        if (!show) continue;
+      }
       // ---- status light ----
       let lit = 1;
-      if (!a.pump) {
+      if (a.sty) {
+        a.col.copy(C_MAG); lit = sOn;
+      } else if (!a.pump) {
         const lab = streaming ? st.quality?.[i]?.label || 'off' : 'off';
         if (lab === 'good') a.col.copy(C_GRN);
         else if (lab === 'noisy') a.col.copy(C_AMB);
@@ -219,12 +263,14 @@ export class Arms {
         else if (lab === 'railed') a.col.copy(C_RED);
         else { a.col.copy(C_OFF); lit = 0; }
         if (lit > 0 && dose[i] > 0.01) a.col.lerp(C_CYN, Math.min(1, dose[i] * 1.3));   // cyan flash on each dose
+        if (gold > 0 && lab === 'good') a.col.lerp(C_GOLD, gold * 0.6);   // harmony warms healthy lights (red/amber stay honest)
       } else {
         const lock = streaming && st.bpm > 0;
         a.col.copy(lock ? C_RED : C_OFF); lit = lock ? 0.12 + 0.88 * Math.min(1, dose[4]) : 0;
       }
       // ---- glitch (artifact hold → this arm; motion → all) ----
-      const gT = st.ready === 'live' && ((!a.pump && st.held?.[i]) || st.motion) ? 1 : 0;
+      // PLAY: head motion is intentional → no motion glitch; a held sensor still glitches (honest data); stylus never
+      const gT = !a.sty && st.ready === 'live' && ((!a.pump && st.held?.[i]) || (st.motion && !st.play)) ? 1 : 0;
       a.glitch += (gT - a.glitch) * Math.min(1, dt * (gT ? 14 : 5));
       if (t - a.gAt > 0.05) {   // jumps at ~20Hz
         a.gAt = t; const gm = a.glitch * a.rL;
@@ -235,16 +281,31 @@ export class Arms {
       if (glitching) lit *= a.stutter;
       a.u.uGlitch.value = glitching ? a.glitch * (0.5 + 0.5 * a.stutter) : 0; a.u.uTime.value = t;
       a.led.color.copy(a.col).multiplyScalar(lit);
-      a.nozLed.color.copy(a.col).multiplyScalar(lit);
-      a.hRing.material.color.copy(a.col).multiplyScalar(lit * 0.55);
-      a.hNoz.material.color.copy(a.col).multiplyScalar(lit * (0.5 + (a.pump ? dose[4] : dose[i]) * 0.8));
-      a.trim.emissiveIntensity = 0.12 + 0.45 * this.wake;
+      if (a.sty) {   // white nozzle, magenta trim; halo brightens while it stirs
+        a.nozLed.color.copy(C_WHT).multiplyScalar(lit);
+        a.hRing.material.color.copy(a.col).multiplyScalar(lit * 0.55);
+        a.hNoz.material.color.copy(C_WHT).multiplyScalar(lit * 0.55);
+        a.trim.emissiveIntensity = (0.25 + 0.5 * this.wake) * sOn;
+      } else {
+        a.nozLed.color.copy(a.col).multiplyScalar(lit);
+        a.hRing.material.color.copy(a.col).multiplyScalar(lit * 0.55);
+        a.hNoz.material.color.copy(a.col).multiplyScalar(lit * (0.5 + (a.pump ? dose[4] : dose[i]) * 0.8));
+        a.trim.emissiveIntensity = 0.12 + 0.45 * this.wake;
+        if (gold > 0) { a.trim.emissive.copy(C_TRIM).lerp(C_GOLD, gold); a.trim.emissiveIntensity *= 1 + 0.6 * gold; }
+        else if (a.goldWas) a.trim.emissive.copy(C_TRIM);
+        a.goldWas = gold > 0;
+      }
 
       // ---- pose: rest at the site; plunge on beat; dormant = lifted + pulled back ----
       if (a.plT < 1) a.plT = Math.min(1, a.plT + dt / 0.38);
       const pl = a.plT < 1 ? Math.sin(Math.PI * a.plT) * a.plA : 0;
       const tip = v[1].copy(a.tip);
+      if (a.sty) {   // follows the stylus point; retracts toward its shoulder and lifts as PLAY eases out
+        tip.set(fx.sx - this.w / 2, this.h / 2 - fx.sy, 0);
+        tip.lerp(a.base, (1 - sOn) * 0.7); tip.z += (1 - sOn) * R * 0.6;
+      }
       tip.z -= pl * R * 0.05; tip.addScaledVector(a.inward, pl * R * 0.025);
+      if (bOff > 0 && i < 4) tip.addScaledVector(a.inward, -bOff);   // breath: nozzle slides out along its inward line
       const sleep = 1 - this.wake;
       tip.lerp(a.base, sleep * 0.16); tip.z += sleep * R * 0.45;
       const W = v[2].copy(tip); W.z += a.hh + a.nl;
@@ -254,7 +315,7 @@ export class Arms {
       const L1 = a.L1, L2 = a.L2;
       dl = Math.max(Math.abs(L1 - L2) + 1, Math.min(dl, (L1 + L2) * 0.995));
       const uDir = dvec.normalize();
-      const n = v[4].copy(AX_Z).multiplyScalar(0.7).addScaledVector(a.lat, a.pump ? 0.35 : 0.7);
+      const n = v[4].copy(AX_Z).multiplyScalar(0.7).addScaledVector(a.lat, a.pump ? 0.35 : a.sty ? 0.45 : 0.7);
       n.addScaledVector(uDir, -n.dot(uDir));
       if (n.lengthSq() < 1e-6) n.copy(AX_X); n.normalize();
       const along = (L1 * L1 - L2 * L2 + dl * dl) / (2 * dl), hgt = Math.sqrt(Math.max(0, L1 * L1 - along * along));
@@ -303,6 +364,19 @@ export class Arms {
       }
     }
     this.renderer.render(this.scene, this.cam);
+  }
+
+  /** BREATHE guide: ellipse ring around the head, radius follows the lungs; cyan, warming gold with harmony. Never strobes. */
+  _guide(fx, t) {
+    const on = fx ? fx.ring : 0, g = this.guide, gg = this.guideGlow;
+    g.visible = gg.visible = on > 0.002;
+    if (!g.visible) return;
+    const H = this.head, k = 1.22 + 0.34 * fx.level;
+    g.scale.set(H.rx * k, H.ry * k, 1); gg.scale.copy(g.scale);
+    const c = this.cTmp.copy(C_CYN).lerp(C_GOLD, fx.gold);
+    const a = on * (0.55 + 0.25 * fx.level);
+    this.ringMat.color.copy(c).multiplyScalar(a); this.ringMat.opacity = 1;
+    this.ringGlowMat.color.copy(c).multiplyScalar(a * 0.22); this.ringGlowMat.opacity = 1;
   }
 
   /** place a unit Y-aligned mesh between a and b with radius r (+Y, i.e. a cone's apex, points at b) */

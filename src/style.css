@@ -1,4 +1,4 @@
-:root{--cy:#00fff0;--mg:#ff2bd6;--am:#ffb000;--vi:#8a4dff;--gn:#00ff9c;--rd:#ff3355;--bg:#030308;--panel:rgba(4,5,12,.78);--line:rgba(0,255,240,.28)}
+:root{--gd:#ffc45a;--cy:#00fff0;--mg:#ff2bd6;--am:#ffb000;--vi:#8a4dff;--gn:#00ff9c;--rd:#ff3355;--bg:#030308;--panel:rgba(4,5,12,.78);--line:rgba(0,255,240,.28)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--cy);font:12px/1.35 ui-monospace,Menlo,monospace;overflow:hidden}
@@ -186,3 +186,26 @@ button.done:hover{background:var(--gn);color:var(--bg)}
   #sessphase{letter-spacing:.14em}
   select{max-width:150px}
 }
+
+/* ---------- PLAY hint (top-left; top-centre = session banner, top-right = Signal Lab) ---------- */
+#playhint{position:fixed;left:16px;top:16px;z-index:4;max-width:min(340px,calc(100vw - 32px));padding:5px 10px;
+  color:#ffe6fb;font-size:11px;letter-spacing:.06em;line-height:1.45;pointer-events:none;
+  background:linear-gradient(90deg,rgba(30,4,26,.72),rgba(4,5,12,.45));border-left:2px solid var(--mg);
+  text-shadow:-1px 0 rgba(255,43,214,.55),1px 0 rgba(0,255,240,.45);box-shadow:0 0 14px rgba(255,43,214,.18)}
+
+/* ---------- BREATHE readout: gold sync meter + breath word inside the meters column ---------- */
+#breathui{grid-template-columns:46px minmax(0,1fr) 32px;grid-template-rows:auto auto;row-gap:2px;color:var(--gd);transition:text-shadow .8s ease}
+#breathui>span:first-child{color:var(--gd)}
+#m-sync{background:var(--gd);box-shadow:0 0 8px rgba(255,196,90,.7);transition:width .4s ease}
+#v-sync{color:var(--gd)}
+#breathword{grid-column:1/-1;grid-row:2;color:#fff3d6;letter-spacing:.22em;text-transform:uppercase;font-weight:bold;font-size:11px;
+  text-shadow:0 0 6px rgba(255,196,90,.55);transition:color .8s ease,text-shadow .8s ease}
+#breathword:empty{display:none}
+#breathui.harmony #breathword{color:#fff8e6;text-shadow:0 0 6px var(--gd),0 0 16px rgba(255,196,90,.8)}
+#breathui.harmony .mt{border-color:rgba(255,196,90,.6);box-shadow:0 0 10px rgba(255,196,90,.45)}
+#breathui.harmony #m-sync{box-shadow:0 0 14px var(--gd)}
+#playbtn.on{border-color:var(--mg);color:var(--mg);box-shadow:0 0 10px rgba(255,43,214,.35)}
+#playbtn.on:hover{background:var(--mg);color:var(--bg)}
+#breathbtn.on{border-color:var(--gd);color:var(--gd);box-shadow:0 0 10px rgba(255,196,90,.35)}
+#breathbtn.on:hover{background:var(--gd);color:var(--bg)}
+@media (max-width:520px){#playhint{left:10px;top:10px;font-size:10px}}

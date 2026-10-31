@@ -8,6 +8,10 @@
 // relax -> viscosity (softer, slower spread), focus -> vorticity confinement (finer curls),
 // gyro yaw/pitch -> gentle body force, roll -> slow rotation. Not live: the sim does not step,
 // nothing is injected, existing ink holds still and fades very slowly to a black pool.
+// PLAY (st.play): a sixth stylus arm follows st.head and stirs the water with the user's real head motion (even between
+// beats); blink drops ink from the forehead nozzles, clench ripples from the cortex. BREATHE (st.breath.on): the injector
+// nozzles retract/extend with st.breath.level (dye follows the nozzles), the cortex swells, a guide ring breathes; harmony
+// (st.harmony) warms the machine gold and weaves a pulse-gated gold thread between the sensor sites.
 // Mapping table: docs/PLAN.md. Consumes only the `state` object.
 
 import { Arms } from './arms.js';
@@ -17,7 +21,7 @@ const BANDS = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
 const COL = [
   [0.54, 0.30, 1.00], [1.00, 0.17, 0.84], [0.00, 1.00, 0.94], [1.00, 0.69, 0.00], [0.72, 0.74, 0.82],
 ];
-const MAXS = 32;            // splat slots per pass (20 streams + 8 pulse spokes + blink)
+const MAXS = 64;            // splat slots per pass (20 streams + 8 pulse spokes + blink + PLAY stylus/droplets/ripple + gold thread)
 const SIM_RES = 128;        // velocity grid, short side
 const DYE_RES = 512;        // dye grid, short side
 const PRESSURE_ITERS = 20;
@@ -28,6 +32,9 @@ const CAM_FOV = 30;               // must match arms.js FOV (pool plane maps 1:1
 const SITE_ANG = [-1.75, -0.55, 0.55, 1.75, 0];
 const SITE_RAD = [1.0, 1.0, 1.0, 1.0, 0.94];
 const ZERO3 = { x: 0, y: 0, z: 0 };
+const ZERO2 = { x: 0, y: 0 };
+const GOLD = [1.0, 0.80, 0.42];   // harmony thread: pale champagne gold (kept off beta's deeper amber)
+const LUNG = 0.32;                // breathe guide: nozzle retraction at empty lungs, in head radii (tips on their sites when full)
 const deadzone = v => (Math.abs(v) < 4 ? 0 : v - Math.sign(v) * 4);   // gyro deg/s
 
 const VS = `#version 300 es
@@ -179,6 +186,7 @@ const FS = {
     uniform vec3 uSC[4];          // per-sensor light colour (dominant-band colour x level x quality)
     uniform vec2 uScan;           // heart-clock scan: phase, strength
     uniform float uWake, uPr;
+    uniform vec3 uBr;             // BREATHE: lung level x on, harmony gold, PLAY clench flash (all 0 when off)
     const vec2 SQ[4] = vec2[4](vec2(-0.984, -0.178), vec2(-0.523, 0.852), vec2(0.523, 0.852), vec2(0.984, -0.178));
     float dens(vec2 p){ vec3 c = texture(uDye, p).rgb; return 1.0 - exp(-max(max(c.r, c.g), c.b) * 1.4); }
     void main(){
@@ -220,6 +228,11 @@ const FS = {
         float sweep = uScan.y * exp(-pow((q.y - (1.1 - 2.2 * uScan.x)) * 6.0, 2.0));
         holo = (vec3(0.03, 0.30, 0.42) * (fres * 0.8 + ridge * 0.10) + acc * (0.22 + 1.1 * fres + 0.55 * ridge)
               + vec3(0.5, 0.9, 1.0) * sweep * (0.15 + ridge) * 0.35) * m * scan * uWake;
+        if (uBr.x > 0.0 || uBr.y > 0.0 || uBr.z > 0.0) {   // additive only, so off = the exact pre-existing image
+          holo += (vec3(0.03, 0.30, 0.42) * (0.25 + 0.6 * fres) + acc * 0.6) * uBr.x * 0.55 * m * scan * uWake;     // swells with the breath
+          holo += vec3(1.0, 0.74, 0.30) * uBr.y * (0.55 * fres + 0.12 * ridge) * m * scan * uWake;                    // harmony: gold rim
+          holo += vec3(0.6, 0.95, 1.0) * uBr.z * (0.25 + 0.9 * ridge + 0.5 * fres) * m * uWake;                        // clench flash
+        }
       }
       vec3 beneath = (water + holo * 0.5) * exp(-Lc * 2.2);           // ink absorbs what is below it
       // ---- ink: hue-preserving saturation (dominant channel kept, minor channels pushed down) ----
@@ -266,6 +279,7 @@ uniform vec2 uCss;     // CSS px viewport
 uniform vec3 uCam;     // camera offset x/y (CSS px, y up) + distance to the pool plane
 uniform float uDepth;  // CSS px depth of the deepest layer
 uniform float uPr, uWake;
+uniform float uGold, uTime;   // harmony ~1: slow gold shimmer (brightness only, never moves a mote)
 out vec3 vCol; out float vA;
 void main(){
   vec4 p = texelFetch(uPos, ivec2(gl_VertexID % uW, gl_VertexID / uW), 0);
@@ -281,6 +295,13 @@ void main(){
   vCol = vec3(0.30, 0.55, 0.65) * 0.25 + hue * 1.3;    // lit by the ink they float in
   vA = (0.10 + 0.32 * near * near) * (0.25 + 0.75 * fract(p.w * 7.31)) * uWake;
   gl_PointSize = (1.0 + 3.2 * near * near) * uPr;
+  if (uGold > 0.0) {
+    float tw = 0.5 + 0.5 * sin(uTime * (0.6 + 0.5 * fract(p.w * 3.7)) + p.w * 61.0);
+    tw *= tw * step(0.55, fract(p.w * 13.7));
+    vCol += vec3(1.0, 0.78, 0.36) * tw * 1.4 * uGold;
+    vA += tw * 0.35 * uGold * uWake;
+    gl_PointSize += tw * 1.5 * uGold * uPr;
+  }
 }`;
 const MOTE_FS = `#version 300 es
 precision highp float;
@@ -358,6 +379,12 @@ export class InkView {
     this.breath = 0; this.breathS = 0;       // beat-only camera breathing envelope
     this.bw = new Float32Array(20); this.siteT = new Float32Array(4);   // per-site band weights + total dose
     this.moteN = MOTE_W * MOTE_H;
+    // PLAY (gyro stylus + artifact instruments) and BREATHE (machine breath guide + harmony gold); all exactly 0 when off
+    this.play = false; this.playK = 0; this.drop = 0; this.ripple = 0; this.flash = 0;
+    this.sty = { x: 0, y: 0, vx: 0, vy: 0, on: false };   // smoothed stylus nozzle (CSS px) + velocity (CSS px/s)
+    this.lungK = 0; this.lung = 0; this.bOff = 0; this.gold = 0; this.threadPh = 0; this.tt = 0;
+    this.nz = Array.from({ length: 4 }, () => ({ x: 0, y: 0 }));   // nozzle uv (y up) after the breath retraction
+    this.fx = { sOn: 0, sx: 0, sy: 0, bOff: 0, ring: 0, level: 0, gold: 0 };   // shared with the arms overlay (reused)
     this.motes = this._double(MOTE_W, MOTE_H, this.fmtPos, true);
     {
       const init = new Float32Array(MOTE_W * MOTE_H * 4);
@@ -493,12 +520,17 @@ export class InkView {
     this.breath = Math.max(this.breath, s);
     this.arms?.onBeat(s, this.active);
   }
-  onBlink() { if (this.live) this.blink = 1; }
+  /** kind: 'blink' | 'clench'. PLAY: blink drops ink from both forehead nozzles, clench ripples from the cortex. */
+  onBlink(kind) {
+    if (!this.live) return;
+    if (!this.play) { this.blink = 1; return; }
+    if (kind === 'clench') { this.ripple = 1; this.flash = 1; } else this.drop = 1;
+  }
   clear() {
     const gl = this.gl, P = this.P.clear;
     gl.useProgram(P.p);
     for (const f of [this.dye.read, this.dye.write, this.vel.read, this.vel.write, this.pres.read, this.pres.write]) this._draw(f);
-    this.dose.fill(0); this.pulse = 0; this.blink = 0;
+    this.dose.fill(0); this.pulse = 0; this.blink = 0; this.drop = 0; this.ripple = 0;
   }
   snapshot() { this.snapReq = true; }
 
@@ -537,6 +569,7 @@ export class InkView {
     }
 
     this.lockBpm = st.bpm || 0; this.beatPhase = st.beatPhase || 0; this.beatConf = st.beatConf || 0;
+    this._modes(st, d, live);
     if (live) {
       // window camera: head tilt (accel) slides the eye point; the pool plane stays pinned so nozzles stay on their sites.
       // Frozen when not live (nothing moves before sync). Breathing = small dolly on real beats only.
@@ -551,10 +584,47 @@ export class InkView {
     this._composite();
     if (this.snapReq) { this.snapReq = false; this._save(); }
 
-    this.arms?.frame(st, d, this.dose, this.active, this.cam);
+    this.arms?.frame(st, d, this.dose, this.active, this.cam, this.fx);
     const decay = Math.exp(-d / 0.28);
     for (let i = 0; i < 5; i++) this.dose[i] *= decay;
     this._adapt(dt);
+  }
+
+  /** PLAY stylus + BREATHE lung/harmony envelopes (eased; exactly 0 when the modes are off) */
+  _modes(st, d, live) {
+    const H = this.head, fx = this.fx;
+    this.tt += d;
+    // ---- PLAY: the stylus nozzle follows the integrated head orientation (x turn → left/right, y nod up → up the pool) ----
+    this.play = !!st.play && live;
+    this.playK += ((this.play ? 1 : 0) - this.playK) * Math.min(1, d / 0.35);
+    if (this.playK < 0.002) this.playK = 0;
+    const sty = this.sty;
+    if (this.playK > 0) {
+      const hd = st.head || ZERO2;
+      const tx = H.x + Math.max(-1, Math.min(1, hd.x || 0)) * H.rx * 1.15;
+      const ty = H.y - Math.max(-1, Math.min(1, hd.y || 0)) * H.ry * 1.15;
+      if (!sty.on) { sty.x = tx; sty.y = ty; sty.vx = sty.vy = 0; sty.on = true; }
+      const k = Math.min(1, d / 0.12), ox = sty.x, oy = sty.y;
+      sty.x += (tx - sty.x) * k; sty.y += (ty - sty.y) * k;
+      sty.vx = d > 0 ? (sty.x - ox) / d : 0; sty.vy = d > 0 ? (sty.y - oy) / d : 0;
+    } else { sty.on = false; sty.vx = sty.vy = 0; }
+    // ---- BREATHE: lung level retracts the injector nozzles along their inward line (tips on their sites at full lungs) ----
+    const br = st.breath, bOn = !!(br && br.on) && live;
+    this.lungK += ((bOn ? 1 : 0) - this.lungK) * Math.min(1, d / 0.8);
+    if (this.lungK < 0.002) this.lungK = 0;
+    const level = this.lungK > 0 ? Math.max(0, Math.min(1, (br && br.level) || 0)) : 0;
+    this.lung = this.lungK * level;
+    this.bOff = this.lungK > 0 ? this.lungK * (1 - level) * H.ry * LUNG : 0;
+    const hTarget = bOn ? Math.max(0, Math.min(1, st.harmony || 0)) : 0;
+    this.gold += (hTarget * this.lungK - this.gold) * Math.min(1, d / 0.6);
+    if (this.gold < 0.002) this.gold = 0;
+    this.flash *= Math.exp(-d / 0.3); if (this.flash < 0.003) this.flash = 0;
+    for (let i = 0; i < 4; i++) {   // nozzle positions in uv (y up); bOff = 0 → exactly the sites
+      this.nz[i].x = (this.sites[i].x - this.dirs[i].x * this.bOff) / this.cssW;
+      this.nz[i].y = 1 - (this.sites[i].y + this.dirs[i].y * this.bOff) / this.cssH;
+    }
+    fx.sOn = this.playK; fx.sx = sty.x; fx.sy = sty.y; fx.bOff = this.bOff;
+    fx.ring = this.lungK; fx.level = level; fx.gold = this.gold;
   }
 
   // ---------- simulation ----------
@@ -578,7 +648,7 @@ export class InkView {
     for (let i = 0; i < 4; i++) {
       if (!this.active[i]) continue;
       const Wt = this.bw, Ti = this.siteT[i];
-      const dx = this.dirs[i].x, dy = this.dirs[i].y, px = this.sites[i].x / this.cssW, py = 1 - this.sites[i].y / this.cssH;
+      const dx = this.dirs[i].x, dy = this.dirs[i].y, px = this.nz[i].x, py = this.nz[i].y;
       const dose = this.dose[i];
       for (let b = 0; b < 5; b++) {
         const lvl = Ti * Wt[i * 5 + b] * 0.4;             // this band's share of the site's dose (normalised weights)
@@ -616,10 +686,16 @@ export class InkView {
     if (this.blink > 0) {   // small stir at the forehead sites
       for (let i = 1; i <= 2 && n < MAXS; i++) {
         const a = Math.random() * Math.PI * 2, o = n * 4; n++;
-        sP[o] = this.sites[i].x / this.cssW; sP[o + 1] = 1 - this.sites[i].y / this.cssH; sP[o + 2] = (Rn * 0.12) ** 2;
+        sP[o] = this.nz[i].x; sP[o + 1] = this.nz[i].y; sP[o + 2] = (Rn * 0.12) ** 2;
         sV[o] = Math.cos(a) * 30; sV[o + 1] = Math.sin(a) * 30;
       }
       this.blink = 0;
+    }
+    if (this.play || this.gold > 0.01) {
+      this.nV = n; this.mD = m;
+      if (this.play) this._play(st, dt);                       // stylus stir + artifact instruments (the user's real motion)
+      if (this.gold > 0.01 && st.bpm > 0) this._thread(dt);    // gold thread: dye, gated by pulse lock like all ink
+      n = this.nV; m = this.mD;
     }
 
     // ---- velocity pass: splats + body force + rotation ----
@@ -681,6 +757,70 @@ export class InkView {
     this._draw(this.motes.write); this.motes.swap();
   }
 
+  _vel(x, y, r2, vx, vy) {
+    if (this.nV >= MAXS) return; const o = this.nV++ * 4, a = this.sP, b = this.sV;
+    a[o] = x; a[o + 1] = y; a[o + 2] = r2; b[o] = vx; b[o + 1] = vy;
+  }
+  _dye(x, y, r2, r, g, b) {
+    if (this.mD >= MAXS) return; const o = this.mD++ * 4, a = this.dP, c = this.dC;
+    a[o] = x; a[o + 1] = y; a[o + 2] = r2; c[o] = r; c[o + 1] = g; c[o + 2] = b;
+  }
+
+  /** PLAY: head-steered stylus stirs (velocity along its motion ∝ speed + faint dominant-band trail);
+   *  blink → ink droplets from both forehead nozzles; clench → velocity ripple ring from the cortex centre */
+  _play(st, dt) {
+    const Rn = this.Rn, asp = this.aspect, sty = this.sty, R = this.head.ry;
+    const sp = Math.hypot(sty.vx, sty.vy);
+    if (sty.on && sp > R * 0.04) {   // deadband: a still head leaves the water still
+      const x = sty.x / this.cssW, y = 1 - sty.y / this.cssH, k = this.playK * this.playK;
+      const toTex = this.vel.read.h / this.cssH, g = Math.min(1, dt * 9) * k;
+      const cap = Math.min(1, (R * 3) / sp);   // capped at 3 head radii / s
+      this._vel(x, y, (Rn * 0.05) ** 2, sty.vx * toTex * g * cap, -sty.vy * toTex * g * cap);
+      // trail tinted by the current dominant band
+      const bs = st.bands; let bi = 2, bv = -1;
+      if (bs) for (let b = 0; b < 5; b++) { const l = bs[BANDS[b]] || 0; if (l > bv) { bv = l; bi = b; } }
+      const amt = Math.min(1, sp / (R * 2)) * dt * 1.6 * k;
+      this._dye(x, y, (Rn * 0.018) ** 2, COL[bi][0] * amt, COL[bi][1] * amt, COL[bi][2] * amt);
+    }
+    if (this.drop > 0) {   // ink droplet: bright splash ring from each forehead nozzle + small outward kick
+      const W = this.bw;
+      for (let s = 1; s <= 2; s++) {
+        let cr = 0, cg = 0, cb = 0;
+        for (let b = 0; b < 5; b++) { const w = W[s * 5 + b]; cr += COL[b][0] * w; cg += COL[b][1] * w; cb += COL[b][2] * w; }
+        if (cr + cg + cb < 0.05) { cr = COL[2][0]; cg = COL[2][1]; cb = COL[2][2]; }   // no band reading: alpha cyan
+        cr = cr * 0.65 + 0.35; cg = cg * 0.65 + 0.35; cb = cb * 0.65 + 0.35;              // bright splash
+        const cx = this.nz[s].x, cy = this.nz[s].y, r0 = Rn * 0.04;
+        this._dye(cx, cy, (Rn * 0.016) ** 2, cr * 0.5, cg * 0.5, cb * 0.5);
+        for (let k = 0; k < 6; k++) {
+          const a = k * (Math.PI / 3) + s, ux = Math.cos(a), uy = Math.sin(a);
+          this._dye(cx + (ux * r0) / asp, cy + uy * r0, (Rn * 0.012) ** 2, cr * 0.42, cg * 0.42, cb * 0.42);
+        }
+        for (let k = 0; k < 4; k++) {
+          const a = k * (Math.PI / 2) + 0.4 + s, ux = Math.cos(a), uy = Math.sin(a);
+          this._vel(cx + (ux * r0 * 0.7) / asp, cy + uy * r0 * 0.7, (Rn * 0.035) ** 2, ux * 22, uy * 22);
+        }
+      }
+      this.drop = 0;
+    }
+    if (this.ripple > 0) {   // clench: ripple ring of velocity from the cortex centre
+      const cx = this.head.x / this.cssW, cy = 1 - this.head.y / this.cssH, r0 = Rn * 0.3;
+      for (let k = 0; k < 8; k++) {
+        const a = k * (Math.PI / 4) + 0.39, ux = Math.cos(a), uy = Math.sin(a);
+        this._vel(cx + (ux * r0) / asp, cy + uy * r0, (Rn * 0.16) ** 2, ux * 55, uy * 55);
+      }
+      this.ripple = 0;
+    }
+  }
+
+  /** HARMONY: a thin gold thread weaves through the four sensor sites (TP9 → AF7 → AF8 → TP10 and back), ∝ harmony */
+  _thread(dt) {
+    this.threadPh += dt * (Math.PI * 2 / 16);
+    const H = this.head, ph = this.threadPh, a = 1.75 * Math.sin(ph), rad = 1.0 + 0.07 * Math.sin(ph * 7.0);
+    const x = (H.x + Math.sin(a) * H.rx * rad) / this.cssW, y = 1 - (H.y - Math.cos(a) * H.ry * rad) / this.cssH;
+    const amt = this.gold * dt * 7.0;
+    this._dye(x, y, (this.Rn * 0.014) ** 2, GOLD[0] * amt, GOLD[1] * amt, GOLD[2] * amt);
+  }
+
   /** not live: no stepping, no injection; ink holds still and fades to a black pool (half-life ~30s) */
   _fade(dt) {
     const Q = this.P.copy; this._use(Q, this.dye.read);
@@ -711,8 +851,10 @@ export class InkView {
     gl.uniform4f(Q.u.uHead, this.head.x * s, H - this.head.y * s, this.head.rx * s, this.head.ry * s);
     gl.uniform1f(Q.u.uOutline, noOutline ? 0 : this.outline);
     gl.uniform1f(Q.u.uCA, 0.012);
-    gl.uniform3f(Q.u.uCtx, (cw2 + C.ox * (1 - sC) + hxw * sC) * s, (ch2 + C.oy * (1 - sC) + hyw * sC) * s, R * sC * s);
+    const swell = this.lung > 0 ? 1 + 0.06 * this.lung : 1;   // cortex swells with the breath (exactly 1 when off)
+    gl.uniform3f(Q.u.uCtx, (cw2 + C.ox * (1 - sC) + hxw * sC) * s, (ch2 + C.oy * (1 - sC) + hyw * sC) * s, R * sC * s * swell);
     gl.uniform1f(Q.u.uCAsp, this.head.rx / this.head.ry);
+    gl.uniform3f(Q.u.uBr, this.lung, this.gold, this.flash);
     gl.uniform3f(Q.u.uFloor, (cw2 + C.ox * (1 - sF) + hxw * sF) * s, (ch2 + C.oy * (1 - sF) + hyw * sF) * s, R * 1.6 * sF * s);
     gl.uniform3fv(Q.u.uSC, this.siteCol);
     const lock = this.live && this.lockBpm > 0;
@@ -730,6 +872,8 @@ export class InkView {
       gl.uniform3f(Q.u.uCam, C.ox, C.oy, C.Dk);
       gl.uniform1f(Q.u.uDepth, R * 1.6);
       gl.uniform1f(Q.u.uPr, s); gl.uniform1f(Q.u.uWake, this.wake);
+      const sh = this.gold > 0.8 ? (this.gold - 0.8) / 0.2 : 0;   // shimmer only near full harmony
+      gl.uniform1f(Q.u.uGold, sh * sh * (3 - 2 * sh)); gl.uniform1f(Q.u.uTime, this.tt);
       gl.bindVertexArray(this.emptyVao);
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
       gl.drawArrays(gl.POINTS, 0, this.moteN);

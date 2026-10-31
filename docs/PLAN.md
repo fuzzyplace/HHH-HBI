@@ -28,6 +28,13 @@ What each signal is and how far to trust it: `docs/SIGNALS.md`. Design rule: **a
 - Bands → PAINT particle pigment share ∝ band level²; dabs snap to band pigments.
 - Changed: relax no longer sets the PAINT palette mood (it still drives trails and drag).
 
+**v0.7 additions (PLAY / BREATHE / harmony visuals):**
+- `play` + `head` → INK stylus arm follows the head and stirs (velocity along its motion ∝ speed, dead zone 0.04 R/s, cap 3 R/s, faint dominant-band dye trail). Runs without a pulse lock (it's the user's real motion); motion glitch suppressed in PLAY, held sensors still glitch and pause.
+- Blink / clench in PLAY → ink drop from both forehead nozzles / 8-spoke ripple from the cortex centre + cortex flash; sounds: drop "plink" / low ripple swell.
+- `breath.level` → injector nozzles slide out up to 0.32 R at empty lungs (ink follows; pump pinned so the heart pulse stays at its sensor); cortex swells 6% and brightens; guide ring 1.22–1.56 R.
+- `harmony` → gold trim, "good" lights warm toward gold (red/amber stay honest), gold cortex rim + guide ring, champagne-gold thread TP9→AF7→AF8→TP10 every 16s (needs pulse lock), gold mote shimmer above 0.8.
+- GROOVE: tempo = heart × 1.5 or × 2 (nearest 122, sticky, glide ≤0.06 BPM per 16th), heartbeats nudge the grid 20% toward the nearest 8th; kick ∝ conf with sidechain on bass/pad/chord; delta → bass, theta → pad, alpha → pluck density, beta → open hats, gamma → 16th hats, focus → claps + bass cutoff, relax → delay wet; breath → noise wash; harmony → root bass, bell plucks, shimmer pad. Chord bed at 0.45× underneath; no thump in groove (the kick is the heart).
+
 (Removed in v0.5: left/right asymmetry → stereo pan — it would smear the binaural pairs.)
 
 Calibration cues: one soft tone at step 1→2, two rising tones at the end (audio on).
