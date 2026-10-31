@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
 // ORBS view — five glowing band-coloured orbs swirl around a centre in 3D orbits.
-// Each orb's size/glow modulate with its band; the heartbeat paces the swirl:
-// angular advance surges on each beat and eases out over the beat period (via st.beatPhase),
-// so the orbit visibly breathes with the pulse. Calm, legible, no glitch/scanline post.
+// Each orb's size/glow modulate with its band. Only real heartbeats move the swirl: each beat is an
+// angular + glow surge that eases out, plus a small drift that decays to rest without beats.
+// No default pace. Still (frozen) unless st.ready is 'live'. Calm, legible, no glitch/scanline post.
 // See docs/PLAN.md mapping table.
 
 const BANDS = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
@@ -12,7 +12,6 @@ const COLS = {
   beta: [1.00, 0.69, 0.00], gamma: [1.00, 1.00, 1.00],
 };
 const TRAIL = 48;                     // trail points per orb (ring buffer)
-const DEF_PACE = 50 / 60;             // default breathing pace when no heart lock
 
 function softSprite() {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -28,7 +27,7 @@ function softSprite() {
 export class OrbsView {
   constructor(canvas) {
     this.canvas = canvas; this.snapReq = false;
-    this.relaxS = 0.5; this.focusS = 0.5; this.surge = 0; this.extraAngle = 0;
+    this.relaxS = 0.5; this.focusS = 0.5; this.surge = 0; this.drift = 0; this.extraAngle = 0;
 
     const r = this.renderer = new THREE.WebGLRenderer({
       canvas, alpha: false, antialias: true, preserveDrawingBuffer: true,
@@ -93,12 +92,13 @@ export class OrbsView {
   onBeat(strength = 1) {
     const s = Math.max(0, Math.min(1, strength));
     this.surge = Math.min(1.4, this.surge + 0.5 + s * 0.6);   // angular + glow surge (capped)
+    this.drift = Math.min(0.5, this.drift + 0.15 + s * 0.1);
   }
 
-  onBlink() { this.surge = Math.min(1.4, this.surge + 0.35); }
+  onBlink() { if (this._st?.ready === 'live') this.surge = Math.min(1.4, this.surge + 0.35); }
 
   clear() {
-    this.surge = 0; this.extraAngle = 0;
+    this.surge = 0; this.drift = 0; this.extraAngle = 0;
     for (const o of this.orbs) {
       o.tpos.fill(0); o.tcol.fill(0); o.thead = 0;
       o.pa.needsUpdate = true; o.ca.needsUpdate = true;
@@ -107,6 +107,8 @@ export class OrbsView {
 
   frame(st, dt) {
     this._st = st;
+    // not live: nothing moves — skip update and rendering, the canvas keeps its last (or black) image
+    if (st.ready !== 'live') { if (this.snapReq) { this.snapReq = false; save(this.canvas); } return; }
     const d = Math.min(0.05, dt || 0.016);
     const relax = st.relax ?? 0.5, focus = st.focus ?? 0.5;
     const ke = Math.min(1, d * 1.2);
@@ -114,15 +116,13 @@ export class OrbsView {
     this.focusS += (focus - this.focusS) * ke;
     const R = this.relaxS, F = this.focusS;
 
-    // heartbeat pace drives the swirl. Base angular rate from bpm; a surge rides each beat,
-    // eased out across the beat period using beatPhase so motion stays continuous and in time.
-    const pace = (st.beatConf > 0 && st.bpm > 0 ? st.bpm / 60 : DEF_PACE);
-    const bp = st.beatConf > 0 ? st.beatPhase ?? 0 : 0;
-    const beatEase = (1 - bp) * (1 - bp) * (st.beatConf || 0);      // peaks just after a beat
+    // only beats move the swirl: surge (~0.3s) + small drift (~2.5s) both decay to rest without beats
     this.surge *= Math.pow(0.03, d);
+    this.drift *= Math.pow(0.4, d);
+    const beatEase = Math.min(1, this.surge);
     // focus tightens + speeds up; relax widens + slows
-    const baseRate = pace * (0.5 + F * 1.1) * (1.3 - R * 0.6);
-    const rate = baseRate * (1 + (this.surge + beatEase) * 1.3);
+    const baseRate = (0.5 + F * 1.1) * (1.3 - R * 0.6);
+    const rate = baseRate * (this.surge * 1.3 + this.drift);
     this.extraAngle += rate * d;
 
     // glow swell paced by beat (capped, never full white)
@@ -164,7 +164,7 @@ export class OrbsView {
     const tx = (st.tilt?.y ?? 0) * 0.7, tz = (st.tilt?.x ?? 0) * 0.7;
     this.group.rotation.x += (tx - this.group.rotation.x) * Math.min(1, d * 3);
     this.group.rotation.z += (tz - this.group.rotation.z) * Math.min(1, d * 3);
-    this.group.rotation.y += d * (0.05 + (st.gyro?.y ?? 0) * 0.002);
+    this.group.rotation.y += d * (st.gyro?.y ?? 0) * 0.002;   // real head motion only
 
     this.renderer.render(this.scene, this.cam);
     if (this.snapReq) { this.snapReq = false; save(this.canvas); }

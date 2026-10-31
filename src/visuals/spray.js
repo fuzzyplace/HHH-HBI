@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 
 // SPRAY view — five band emitters spray coloured 3D particles toward the viewer.
-// The heartbeat sets the pace: the field drifts forward at a speed tied to bpm and
-// every onBeat is a burst + forward surge, so the rhythm of the piece IS the heartbeat.
+// Only real heartbeats move it: every onBeat is an emission burst + forward surge, plus a small
+// drift that itself decays to rest without beats. No default pace. Still (frozen) unless st.ready
+// is 'live'.
 // Calm, legible, no glitch/scanline/RGB-split post. See docs/PLAN.md mapping table.
 
 // band order + colours (match HUD)
@@ -13,7 +14,6 @@ const COLS = {
 };
 
 const N = 4000;                 // fixed particle pool
-const DEF_PACE = 50 / 60;       // beats/sec default breathing pace when no heart lock
 
 // one soft round sprite, generated once
 function softSprite() {
@@ -30,7 +30,7 @@ function softSprite() {
 export class SprayView {
   constructor(canvas) {
     this.canvas = canvas; this.snapReq = false;
-    this.relaxS = 0.5; this.focusS = 0.5; this.surge = 0;
+    this.relaxS = 0.5; this.focusS = 0.5; this.surge = 0; this.drift = 0; this.aimX = 0; this.aimY = 0;
     this._scratch = new THREE.Vector3();
 
     const r = this.renderer = new THREE.WebGLRenderer({
@@ -103,6 +103,7 @@ export class SprayView {
   onBeat(strength = 1) {
     const s = Math.max(0, Math.min(1, strength));
     this.surge = Math.min(1.5, this.surge + 0.6 + s * 0.6);   // forward surge (capped, no strobe)
+    this.drift = Math.min(0.6, this.drift + 0.2 + s * 0.15);  // small carry-over drift, decays without beats
     const R = this.relaxS, F = this.focusS;
     for (const em of this.emitters) {
       const lvl = this._band(em.band);
@@ -112,6 +113,7 @@ export class SprayView {
   }
 
   onBlink() {
+    if (this._st?.ready !== 'live') return;
     // a bright quick puff from the two brightest emitters — brief, never full-screen
     const R = this.relaxS, F = this.focusS;
     for (const em of this.emitters) {
@@ -125,12 +127,14 @@ export class SprayView {
   clear() {
     this.pl.fill(0);
     for (let i = 0; i < N * 3; i++) { this.px[i] = 0; this.dispCol[i] = 0; }
-    this.surge = 0;
+    this.surge = 0; this.drift = 0;
     this.posAttr.needsUpdate = true; this.colAttr.needsUpdate = true;
   }
 
   frame(st, dt) {
     this._st = st;
+    // not live: nothing moves — skip integration and rendering, the canvas keeps its last (or black) image
+    if (st.ready !== 'live') { if (this.snapReq) { this.snapReq = false; save(this.canvas); } return; }
     const d = Math.min(0.05, dt || 0.016);
     const relax = st.relax ?? 0.5, focus = st.focus ?? 0.5;
     const ke = Math.min(1, d * 1.2);
@@ -143,19 +147,11 @@ export class SprayView {
     this.aimX = (this.aimX ?? 0) + (ax - (this.aimX ?? 0)) * Math.min(1, d * 4);
     this.aimY = (this.aimY ?? 0) + (ay - (this.aimY ?? 0)) * Math.min(1, d * 4);
 
-    // heartbeat pace: whole field drifts toward viewer at a speed set by bpm
-    const pace = (st.beatConf > 0 && st.bpm > 0 ? st.bpm / 60 : DEF_PACE);
-    const drift = pace * 0.9 + this.surge * 2.2;
-    this.surge *= Math.pow(0.02, d);                       // ~0.4s decay
-
-    // continuous emission, scaled by each band's level
-    for (const em of this.emitters) {
-      const lvl = this._band(em.band);
-      em.emit += (6 + lvl * lvl * 150) * d;
-      let guard = 0;
-      while (em.emit >= 1 && guard++ < 24) { this.spawn(em, R, F, 1); em.emit -= 1; }
-      if (em.emit > 24) em.emit = 0;
-    }
+    // heart-only motion: beat surge (~0.4s decay) + small drift (~2s decay); both reach rest without beats
+    const drift = this.drift * 0.9 + this.surge * 2.2;
+    this.surge *= Math.pow(0.02, d);
+    this.drift *= Math.pow(0.3, d);
+    // emission happens only in onBeat bursts (no continuous spray)
 
     // integrate pool (no allocations)
     const px = this.px, pv = this.pv, pc = this.pc, pl = this.pl, pL = this.pL, out = this.dispCol;
@@ -179,9 +175,8 @@ export class SprayView {
     }
     this.posAttr.needsUpdate = true; this.colAttr.needsUpdate = true;
 
-    // camera breathes gently with the pace; tilt leans it, no violent motion
-    const bp = st.beatConf > 0 ? st.beatPhase ?? 0 : 0;
-    const bob = Math.sin(bp * Math.PI * 2) * 0.12 * (st.beatConf || 0);
+    // camera lifts slightly with each beat surge; tilt leans it, no violent motion
+    const bob = this.surge * 0.08;
     this.cam.position.x += ((st.tilt?.x ?? 0) * 1.1 - this.cam.position.x) * Math.min(1, d * 3);
     this.cam.position.y += ((st.tilt?.y ?? 0) * 0.8 + bob - this.cam.position.y) * Math.min(1, d * 3);
     this.cam.lookAt(0, 0, -1);
