@@ -104,8 +104,8 @@ function wire(src) {
   const live = fn => d => { if (source === src) fn(d); };
   src.on('eeg', live(({ ch, samples }) => { pipe.push(ch, samples); if (ch === 0) { rate.eeg += samples.length; lastEeg = performance.now(); } }));
   src.on('ppg', live(({ ch, samples }) => { pipe.pushPpg(ch, samples); if (ch === 1) rate.ppg += samples.length; }));   // all 3 channels: 0 is ambient light, the pulse is on 1/2
-  src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
-  src.on('gyro', live(g => { pipe.pushMotion('gyro', g); state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
+  src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); if (replay) return; state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
+  src.on('gyro', live(g => { pipe.pushMotion('gyro', g); if (replay) return; state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
   src.on('battery', live(p => { state.battery = p; $('batt').textContent = `🔋 ${Math.round(p)}%`; }));
   src.on('reconnecting', live(({ attempt, max }) => { msg(`Muse signal lost — reconnecting (${attempt}/${max})`); setStatus('MUSE 2 · RECONNECTING'); }));
   src.on('reconnected', live(() => { msg('Muse 2 reconnected'); setStatus('MUSE 2'); }));
