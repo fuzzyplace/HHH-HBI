@@ -2,7 +2,7 @@
 // Reads only the pipeline result (sig); draws at the DSP rate (10Hz), never in the render loop.
 import { BANDS } from '../dsp/bands.js';
 
-const HIST = 300;   // 30s at 10Hz
+const HIST = 600;   // 30s at 20Hz (DSP tick rate)
 const BAND_COLORS = { delta: '#8a4dff', theta: '#ff2bd6', alpha: '#00fff0', beta: '#ffb000', gamma: '#ffffff' };
 const QC = { good: '#00ff9c', noisy: '#ffb000', 'no contact': '#ff3355', railed: '#ff3355' };
 const CH = ['TP9', 'AF7', 'AF8', 'TP10'];

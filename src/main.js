@@ -12,12 +12,35 @@ try { scene = await GpuScene.create($('c')); }
 catch (e) { console.warn('GPU scene failed, 2D fallback', e); scene = new Scene($('c')); }
 window.hbi = scene;
 const flashFn = () => scene.flash || 0;
+
+// Views: PAINT (feedback particles on #c), SPRAY and ORBS (calm 3D, own canvases, created on first use)
+const VIEWS = ['spray', 'orbs', 'paint'];
+const VIEW_CANVAS = { paint: 'c', spray: 'cspray', orbs: 'corbs' };
+const views = { paint: scene };
+let view = 'paint', cur = scene;
+async function setView(v) {
+  if (!views[v]) {
+    try {
+      const mod = v === 'spray' ? await import('./visuals/spray.js') : await import('./visuals/orbs.js');
+      views[v] = new (v === 'spray' ? mod.SprayView : mod.OrbsView)($(VIEW_CANVAS[v]));
+    } catch (e) { console.warn(e); msg(`${v} view unavailable: ${e.message}`); return; }
+  }
+  if (v !== 'paint' && hydra?.on) { hydra.toggle(); $('mode').textContent = 'Glitch (G)'; }
+  view = v; cur = views[v];
+  for (const k of VIEWS) $(VIEW_CANVAS[k]).hidden = k !== v;
+  cur.resize?.();
+  $('view').textContent = `View: ${v.toUpperCase()} (V)`;
+  try { localStorage.setItem('hbi.view', v); } catch {}
+}
+const nextView = () => setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]);
+window.hbiViews = () => ({ view, cur, views, state });   // console/debug handle (no signal data beyond the state object)
 const synth = new Synth();
 const pipe = new SignalPipeline();
 const CAL_KEY = 'hbi.calibration.v2';   // local-only: eyes-open/closed index levels (dB) + timestamp, no device IDs
 try { localStorage.removeItem('hbi.calibration.v1'); } catch {}   // v1 (single-state z-score) no longer applies
 try { const j = JSON.parse(localStorage.getItem(CAL_KEY) || 'null'); if (j && !pipe.importCalibration(j)) localStorage.removeItem(CAL_KEY); } catch {}
 let sig = null;   // latest pipeline result
+let beatBase = 0, beatAt = 0;   // last heart phase from the pipeline, extrapolated per frame
 // hardware-test readout: run hbiDiag() in DevTools and paste the JSON (signal stats only, no device IDs)
 const diag = { since: 0, ticks: 0, rejected: 0 };
 const r1 = v => Math.round(v * 100) / 100;
@@ -45,6 +68,7 @@ const state = {
   bands: Object.fromEntries(BAND_NAMES.map(k => [k, 0])),
   ch: Array.from({ length: 4 }, () => Object.fromEntries(BAND_NAMES.map(k => [k, 0]))),
   relax: 0.5, focus: 0.5,   // primary drivers (0..1): calm vs activation — see docs/SIGNALS.md
+  beatPhase: 0, beatConf: 0, // heart clock: 0..1 through the current beat, lock confidence — the heartbeat paces every view
   asym: 0, bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
 };
 
@@ -58,7 +82,7 @@ const setStatus = label => ($('status').textContent = label + (scene?.webgpu ? '
 function wire(src) {
   const live = fn => d => { if (source === src) fn(d); };
   src.on('eeg', live(({ ch, samples }) => { pipe.push(ch, samples); if (ch === 0) rate.eeg += samples.length; }));
-  src.on('ppg', live(({ ch, samples }) => { if (ch === 0) { pipe.pushPpg(samples); rate.ppg += samples.length; } }));
+  src.on('ppg', live(({ ch, samples }) => { pipe.pushPpg(ch, samples); if (ch === 1) rate.ppg += samples.length; }));   // all 3 channels: 0 is ambient light, the pulse is on 1/2
   src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
   src.on('gyro', live(g => { pipe.pushMotion('gyro', g); state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
   src.on('battery', live(p => { state.battery = p; $('batt').textContent = `🔋 ${Math.round(p)}%`; }));
@@ -93,37 +117,41 @@ $('connect').onclick = async () => {
   finally { connecting = false; $('connect').disabled = false; }
 };
 $('audio').onclick = async () => { await synth.start(); $('audio').textContent = 'Audio ON'; };
-const snap = () => (hydra?.on ? (hydraSnap = true) : scene.snapshot());
+const snap = () => (hydra?.on ? (hydraSnap = true) : cur.snapshot());
 $('snap').onclick = snap;
 const toggleMode = async () => {
+  if (view !== 'paint') await setView('paint');   // the glitch synth layers over the PAINT view only
   try {
     if (!hydra) { const { HydraLayer } = await import('./visuals/hydra.js'); hydra = new HydraLayer($('c'), state, flashFn); }
   } catch (e) { msg('Glitch-synth unavailable: ' + e.message); return; }
-  $('mode').textContent = hydra.toggle() ? 'Mode: GLITCH-SYNTH' : 'Mode: PARTICLES';
+  $('mode').textContent = hydra.toggle() ? 'Glitch: ON (G)' : 'Glitch (G)';
 };
 $('mode').onclick = toggleMode;
-$('clear').onclick = () => scene.clear();
+$('clear').onclick = () => cur.clear();
+$('view').onclick = nextView;
 $('hide').onclick = () => $('hud').classList.toggle('hidden');
 $('simbtns').onclick = e => e.target.dataset.m && window.sim?.setMode?.(e.target.dataset.m);
-addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); });
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); if (e.key === 'v') nextView(); });
 
-// DSP @10Hz — all signal math lives in src/dsp; main only consumes the result
+// DSP @20Hz (heart clock resolution ≈50ms) — all signal math lives in src/dsp; main only consumes the result
 setInterval(() => {
   const r = (sig = pipe.tick(performance.now()));
   for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
   state.asym = r.asym; state.bpm = r.bpm; state.relax = r.relax; state.focus = r.focus;
+  state.beatConf = r.beatConf; beatBase = r.beatPhase; beatAt = performance.now();
   meter('relax', r.relax); meter('focus', r.focus);
   lab.update(r);
-  $('bpm').textContent = `♥ ${r.bpm ? Math.round(r.bpm) : '--'}`;
+  $('bpm').textContent = r.bpm ? `♥ ${Math.round(r.bpm)}` : r.beatConf > 0.05 ? '♥ …' : '♥ --';
+  $('bpm').title = r.heartSource ? `heart lock ${Math.round(r.beatConf * 100)}% via ${r.heartSource} PPG` : 'looking for a pulse';
   for (const k of BAND_NAMES) $('b-' + k).style.width = `${Math.round(state.bands[k] * 200)}px`;
   diag.ticks++; if (r.artifact.rejected) diag.rejected++;
   for (const e of r.events) {
     diag[e] = (diag[e] || 0) + 1;
-    if (e === 'beat') { scene.onBeat(); synth.beat(); }
-    else if (e === 'blink' || e === 'clench') { scene.onBlink(); synth.blink(); }   // mapping: blink/clench → flash + glitch, noise burst
+    if (e === 'beat') { const k = Math.min(1, r.beatConf * 1.2); cur.onBeat(k); synth.beat(k); $('bpm').classList.remove('beat'); void $('bpm').offsetWidth; $('bpm').classList.add('beat'); }
+    else if (e === 'blink' || e === 'clench') { cur.onBlink(); synth.blink(); }   // mapping: blink/clench → flash + glitch, noise burst
   }
   updateCalibration(r.calibration);
-}, 100);
+}, 50);
 
 // Calibration: step 1 eyes open, step 2 eyes closed (10s clean each); a tone marks each step when audio is on
 const CAL_STEPS = {
@@ -190,11 +218,16 @@ setInterval(() => {
   rate.eeg = rate.ppg = rate.imu = 0;
 }, 1000);
 
+let savedView = 'spray';
+try { savedView = localStorage.getItem('hbi.view') || 'spray'; } catch {}
+await setView(VIEWS.includes(savedView) ? savedView : 'spray');
+
 let prev = performance.now();
 (function loop(t) {
   const dt = Math.min(0.1, (t - prev) / 1000); prev = t;
-  scene.frame(state, dt);
-  if (hydra) { hydra.tick(dt); if (hydraSnap) { hydraSnap = false; hydra.snapshot(); } }
+  if (state.bpm) state.beatPhase = (beatBase + ((t - beatAt) / 1000) * (state.bpm / 60)) % 1;
+  cur.frame(state, dt);
+  if (hydra && view === 'paint') { hydra.tick(dt); if (hydraSnap) { hydraSnap = false; hydra.snapshot(); } }
   synth.update(state);
   requestAnimationFrame(loop);
 })(prev);

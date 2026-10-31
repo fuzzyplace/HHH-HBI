@@ -1,5 +1,5 @@
 import { FS, N, BANDS, BAND_NAMES, hann, fft } from './bands.js';
-import { HeartRate } from './ppg.js';
+import { HeartTracker } from './ppg.js';
 
 // One entry point for all signal math. main.js pushes raw samples in and reads `tick()` results out.
 // Outputs are normalized 0..1 values plus discrete events — this is an art/meditation tool, not a measurement device.
@@ -26,7 +26,7 @@ const REFRACTORY_MS = 800;
 const RAIL_UV = 990;               // muse-js µV range is about ±1000
 const FRONTAL = [1, 2], TEMPORAL = [0, 3];   // AF7/AF8 (blink, focus), TP9/TP10 (clench, relax)
 const USABLE_SCORE = 0.25;         // 'noisy' channels below this stay out of everything
-const CLENCH_ADAPT_TICKS = 30;     // high-frequency level held >3s is the new normal, not a clench
+const CLENCH_ADAPT_S = 3;          // high-frequency level held >3s is the new normal, not a clench
 const TAU_POW = 2.0;               // s — smoothing of per-band dB power
 const TAU_PSD = 1.5;               // s — smoothing of the displayed spectrum
 const TAU_OUT = 0.8;               // s — easing of the 0..1 outputs
@@ -84,6 +84,7 @@ export class SignalPipeline {
     this.out = {
       bands: zeros(), ch: Array.from({ length: C }, zeros), asym: 0, bpm: 0,
       relax: 0.5, focus: 0.5,
+      beatPhase: 0, beatConf: 0, heartSource: '',   // heart clock (0..1 through the beat), lock confidence, PPG channel used
       relaxDb: 0, focusDb: 0,                       // raw index values (dB), for the Signal Lab / diagnostics
       dB: zeros(),                                  // smoothed band power averaged over counted channels (dB re 1µV²)
       psd: new Float32Array(PSD_BINS),              // smoothed spectrum (dB), averaged over counted channels
@@ -102,11 +103,11 @@ export class SignalPipeline {
       this.holdUntil[c] = -Infinity; this.Linit[c] = 0; this.rangeCh[c].reset();
     }
     this.rangeAvg.reset();
-    this.p2pBase = 60; this.hfBase = new Float64Array(this.C); this.hfN = new Int32Array(this.C); this.hfOver = new Int32Array(this.C);
+    this.p2pBase = 60; this.hfBase = new Float64Array(this.C); this.hfN = new Int32Array(this.C); this.hfOver = new Float64Array(this.C);
     this.lastBlink = this.lastClench = -Infinity;
-    this.motion = false; this.accAvg = null; this.lastT = null; this.beats = 0;
+    this.motion = false; this.accAvg = null; this.lastT = null;
     this.centerR = null; this.centerF = null;
-    this.hr = new HeartRate(() => { this.beats++; });
+    if (this.hr) this.hr.reset(); else this.hr = new HeartTracker();
     if (this.calRun) this.cancelCalibration();
   }
 
@@ -119,7 +120,8 @@ export class SignalPipeline {
     this.filled[ch] = Math.min(N, this.filled[ch] + samples.length);
   }
 
-  pushPpg(samples) { this.hr.push(samples); }
+  /** pushPpg(ch, samples) — muse-js channels 0 ambient, 1 infrared, 2 red; pushPpg(samples) = channel 0 */
+  pushPpg(ch, samples) { if (samples === undefined) { samples = ch; ch = 0; } this.hr.push(ch, samples); }
 
   pushMotion(kind, { x, y, z }) {
     const m = Math.sqrt(x * x + y * y + z * z);
@@ -184,7 +186,7 @@ export class SignalPipeline {
     if (quad) for (const c of TEMPORAL) {
       if (!this.good[c]) { this.hfN[c] = 0; this.hfOver[c] = 0; continue; }   // re-learn after the electrode reseats
       if (this.hfN[c] >= 10 && this.hf[c] > 4 * this.hfBase[c] && this.hf[c] > 1e-6) {
-        if (++this.hfOver[c] > CLENCH_ADAPT_TICKS) { this.hfBase[c] = this.hf[c]; this.hfOver[c] = 0; } else clench = true;
+        if ((this.hfOver[c] += dt) > CLENCH_ADAPT_S) { this.hfBase[c] = this.hf[c]; this.hfOver[c] = 0; } else clench = true;
       } else this.hfOver[c] = 0;
     }
     a.clench = clench;
@@ -210,9 +212,9 @@ export class SignalPipeline {
       this.hfBase[c] += (this.hf[c] - this.hfBase[c]) * (this.hfN[c] < 10 ? 0.5 : 0.05); this.hfN[c]++;
     }
 
-    for (let n = this.beats; n > 0; n--) ev.push('beat');
-    this.beats = 0;
-    o.bpm = this.hr.bpm;
+    for (let n = this.hr.step(dt); n > 0; n--) ev.push('beat');   // clock pulses, phase-locked to detected beats
+    o.beatConf = this.hr.conf; o.beatPhase = this.hr.phase; o.heartSource = this.hr.bestName;
+    o.bpm = this.hr.conf >= 0.25 ? this.hr.bpm : 0;
 
     if (live) this._update(dt);
     this._calStatus();

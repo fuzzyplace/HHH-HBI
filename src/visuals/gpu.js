@@ -181,8 +181,9 @@ export class GpuScene {
     const f60 = dt * 60;                                   // feedback params are per-60fps-frame; scale for real dt
     U.decay.value = Math.pow(0.84 + R * 0.14, f60);        // longer trails when calm
 
-    // (3) HEARTBEAT → forward motion: feedback-zoom surge (drift between beats) + radial pressure + brightness
-    U.zoom.value = (0.0015 + b.delta * 0.004 + this.beat * 0.025) * f60;
+    // (3) HEARTBEAT → forward motion: base drift ∝ bpm/60 (default pace when no heart lock) + beat surge + pressure + brightness
+    const pace = (st.beatConf > 0 && st.bpm > 0 ? st.bpm / 60 : 50 / 60);
+    U.zoom.value = (0.0015 + b.delta * 0.004 + pace * 0.0016 + this.beat * 0.025) * f60;
     U.pulse.value = this.beat * 1.1;                        // radial pressure pulse through the particle field
     U.beat.value = this.beat;                              // capped brightness swell in post
     U.rot.value = (0.0008 + st.gyro.z * 0.00015) * f60;

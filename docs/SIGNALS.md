@@ -18,7 +18,7 @@ EEG at the scalp is tiny (roughly 5–50 µV). Muscle and eye signals are often 
 
 | Reading | Reliability | Why |
 |---|---|---|
-| **Heartbeat** (PPG) | high | a strong, regular optical signal |
+| **Heartbeat** (PPG) | high when still | a regular optical pulse; motion and a loose fit weaken it |
 | **Blink** | high | eye blinks are huge on the forehead sensors |
 | **Jaw clench** | high | muscle floods 30–44 Hz on the ear sensors |
 | **Head tilt / turn** | high | direct motion sensors |
@@ -27,6 +27,17 @@ EEG at the scalp is tiny (roughly 5–50 µV). Muscle and eye signals are often 
 | Individual bands (delta…gamma) | low | single-band power moves a lot moment to moment; gamma on a Muse is mostly muscle |
 
 What this means in practice: **closing your eyes and settling is the one brain change you should clearly see.** Blinks, clenches, heartbeats and head movement respond instantly. "Concentrating" moves Focus only a little and slowly, and tensing your face moves it more.
+
+## The heartbeat
+
+The Muse 2 shines light into your forehead and measures how much comes back (PPG). It reports three channels: **ambient** (room light — no pulse), **infrared** and **red**. The pulse is a tiny ripple on a large raw level and may point up or down.
+
+1. Each channel is high-passed (removes the slow level) and low-passed (~5 Hz) to leave the pulse shape.
+2. **Autocorrelation** over the last 8 s finds the period at which the shape repeats. A true heartbeat also repeats at twice that period; the second bump inside each beat doesn't, so it can't double the rate. Room light and noise don't repeat, so they score low.
+3. The channel that repeats most strongly is used; its sharpest edge times each beat.
+4. A **beat clock** runs at that rate and is nudged toward each detected beat, so the pace stays steady through a missed beat or a brief movement. Lock confidence (shown on hover over ♥) comes from how strongly the pulse repeats; below 25% there's no thump and the views fall back to a slow breathing pace.
+
+Expect the lock within ~6–10 s of sitting still with the headband snug on your forehead. Talking, chewing and moving weaken it.
 
 ## From raw signal to the two indices
 
@@ -73,7 +84,8 @@ The Signal Lab shows the averaged spectrum (1–45 Hz), the last 30 s of Relax a
 
 - **Relax → colour and calm**: palette (cool cyan/violet when calm, hot amber/magenta when not), longer trails, smoother flow.
 - **Focus → energy**: turbulence, glitch, RGB split, sparks.
-- **Heartbeat → movement**: every beat pushes you forward through the space with a thump you can hear (when audio is on) and a brightness swell.
+- **Heartbeat → pace**: the heart clock sets how fast every view moves, and each beat is a surge (burst of spray, swirl of orbs, push forward in PAINT) with a thump you can hear when audio is on.
+- **Views**: SPRAY (band generators spraying particles), ORBS (swirling band orbs), PAINT (the original, busiest). Press V to switch.
 - **Head tilt → where the paint goes**: new paint is emitted where your head points.
 - Bands and per-channel values only add small texture.
 

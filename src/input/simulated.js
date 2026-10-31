@@ -59,16 +59,20 @@ export class SimulatedSource extends Emitter {
       }
       this.emit('eeg', { ch, samples: out });
     }
-    // PPG @64Hz ~ 68bpm with slow drift
+    // PPG @64Hz, shaped like muse-js raw output: 0 ambient (no pulse), 1 infrared, 2 red —
+    // a large unsigned level with a small pulse that dips on each beat, plus slow drift and noise
     const np = Math.max(1, Math.round(dt * 64));
     const bpm = 68 + 6 * Math.sin(tt * 0.05);
-    const ppg = new Float32Array(np);
+    const ppg = [new Float32Array(np), new Float32Array(np), new Float32Array(np)];
     for (let i = 0; i < np; i++) {
       this.ppgT += (bpm / 60) / 64;
-      const ph = this.ppgT % 1;
-      ppg[i] = Math.exp(-Math.pow((ph - 0.2) / 0.08, 2)) + 0.3 * Math.exp(-Math.pow((ph - 0.5) / 0.1, 2));
+      const ph = this.ppgT % 1, drift = 1500 * Math.sin(this.ppgT * 0.07);
+      const pulse = Math.exp(-Math.pow((ph - 0.2) / 0.08, 2)) + 0.3 * Math.exp(-Math.pow((ph - 0.5) / 0.1, 2));
+      ppg[0][i] = 20000 + 60 * (Math.random() - 0.5);
+      ppg[1][i] = 150000 + drift - 450 * pulse + 40 * (Math.random() - 0.5);
+      ppg[2][i] = 90000 + drift * 0.6 - 160 * pulse + 50 * (Math.random() - 0.5);
     }
-    this.emit('ppg', { ch: 0, samples: ppg });
+    for (let c = 0; c < 3; c++) this.emit('ppg', { ch: c, samples: ppg[c] });
     // motion
     this.emit('accel', { x: 0.15 * Math.sin(tt * 0.4), y: 0.1 * Math.sin(tt * 0.31 + 1), z: 1 });
     this.emit('gyro', { x: 8 * Math.sin(tt * 0.5), y: 12 * Math.sin(tt * 0.35 + 2), z: 6 * Math.sin(tt * 0.2) });

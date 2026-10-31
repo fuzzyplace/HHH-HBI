@@ -165,13 +165,13 @@ test('tick reuses its result object; reset keeps calibration', () => {
 test('ppg beats surface as events', () => {
   const p = new SignalPipeline(), clock = { t: 0, ms: 0 };
   const events = [];
-  for (let k = 0; k < 50; k++) {
+  for (let k = 0; k < 200; k++) {   // 20s: the heart lock needs a few seconds of pulse
     const s = new Float32Array(6);
-    for (let i = 0; i < 6; i++) { const t = (k * 6 + i) / 64; s[i] = 1000 + 300 * Math.max(0, Math.sin(2 * Math.PI * 1.2 * t)) ** 8; }
-    p.pushPpg(s);
+    for (let i = 0; i < 6; i++) { const t = (k * 6 + i) / 64; s[i] = 150000 - 400 * Math.max(0, Math.sin(2 * Math.PI * 1.2 * t)) ** 8; }
+    p.pushPpg(1, s);
     events.push(...run(p, 0.1, sine(10), clock).events);
   }
-  assert.ok(events.filter(e => e === 'beat').length >= 3, events.join());
+  assert.ok(events.filter(e => e === 'beat').length >= 10, events.filter(e => e === 'beat').length + ' beats');
 });
 
 test('a railed or floating temporal electrode cannot lock the pipeline in clench', () => {
