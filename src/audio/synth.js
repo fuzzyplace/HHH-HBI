@@ -1,3 +1,4 @@
+import { Groove } from './groove.js';
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const MASTER = 0.35;   // never above 0.5
 // band → [carrier Hz, binaural beat Hz, octave-layer gain]: a C-major chord, beats at each band's rhythm
@@ -8,6 +9,8 @@ const VOICES = {
 export class Synth {
   ctx = null;
   muted = false;
+  music = 'chord';
+  onKick = null;   // main sets this; groove calls it with seconds-until-kick for visual pulses
   async start() {
     if (this.ctx) return;
     const ctx = (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
@@ -48,6 +51,13 @@ export class Synth {
       this.voices[band] = { g, og };
     }
     this.noiseBuf = this.noise(0.4);
+    this.groove = new Groove(this);
+    this.groove.onKick = d => this.onKick?.(d);
+  }
+  /** 'chord' (binaural chord only) | 'groove' (tech-house parts + chord bed underneath).
+   *  Switching fades parts in/out; persisting the choice is main's job. */
+  setMusic(mode) {
+    this.music = mode === 'groove' ? 'groove' : 'chord';
   }
   setMuted(m) {
     this.muted = !!m;
@@ -67,12 +77,15 @@ export class Synth {
   update(s) {
     if (!this.ctx) return;
     const live = s.ready === 'live', b = s.bands, V = this.voices;
+    // in groove mode the chord sits lower underneath the parts
+    const chordLvl = this.music === 'groove' ? 0.45 : 1;
     // your brain plays the chord: each band's voice follows its level, only once synced
-    for (const band in V) this.set(V[band].g.gain, live ? 0.01 + 0.11 * Math.pow(clamp(b[band]), 1.3) : 0, live ? 1 : 1.5);
+    for (const band in V) this.set(V[band].g.gain, live ? chordLvl * (0.01 + 0.11 * Math.pow(clamp(b[band]), 1.3)) : 0, live ? 1 : 1.5);
     const relax = clamp(s.relax == null ? 0.5 : s.relax);
     const focus = clamp(s.focus == null ? 0.5 : s.focus);
     this.set(this.wet.gain, 0.12 + 0.28 * relax, 1);                      // relax → wetter (capped: dry stays dominant)
     for (const band of ['delta', 'theta']) this.set(V[band].og.gain, 0.2 + 0.25 * focus, 1);   // focus → brighter
+    if (this.groove) this.groove.update(s, this.music === 'groove');
   }
   // one heartbeat pulse at time t0, scaled by amp. Three layers so it reads on BOTH
   // tiny laptop/phone speakers and headphones:
@@ -129,6 +142,8 @@ export class Synth {
   }
   beat(strength = 1) {
     if (!this.ctx) return;
+    // groove mode: the kick IS the heart - don't thump; use the pulse to phase-align the grid
+    if (this.groove?.active) { this.groove.onHeart(); return; }
     const amp = clamp(strength);
     if (amp <= 0) return;                         // strength 0 → play nothing
     const t = this.ctx.currentTime;
@@ -163,6 +178,44 @@ export class Synth {
       o.connect(g).connect(this.bus); o.start(t); o.stop(t + dec + 0.05);
       o.onended = () => g.disconnect();
     }
+  }
+  /** PLAY-mode blink: a liquid "plink" - pitched sine with a fast pitch fall + soft delay echo */
+  drop() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(1320, t); o.frequency.exponentialRampToValueAtTime(330, t + 0.18);   // C-ish fall
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.09, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.35);
+    // soft single echo via a short delay tap
+    const dl = ctx.createDelay(0.5), dw = ctx.createGain();
+    dl.delayTime.value = 0.16; dw.gain.value = 0.3;
+    o.connect(g); g.connect(this.bus); g.connect(dl).connect(dw).connect(this.wet);
+    o.start(t); o.stop(t + 0.4);
+    o.onended = () => { g.disconnect(); dl.disconnect(); dw.disconnect(); };
+  }
+  /** PLAY-mode jaw clench: a soft low whoosh / sub swell */
+  ripple() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(40, t); o.frequency.exponentialRampToValueAtTime(70, t + 0.25);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.9);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.14, t + 0.18);   // slow swell, no peak
+    g.gain.setTargetAtTime(0, t + 0.4, 0.25);
+    // a breath of filtered-noise air over the top
+    const n = ctx.createBufferSource(), f = ctx.createBiquadFilter(), ng = ctx.createGain();
+    n.buffer = this.noiseBuf; n.loop = true; f.type = 'lowpass'; f.frequency.value = 500; f.Q.value = 0.7;
+    ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(0.03, t + 0.2);
+    ng.gain.setTargetAtTime(0, t + 0.4, 0.25);
+    o.connect(g).connect(this.bus);
+    n.connect(f).connect(ng).connect(this.bus);
+    o.start(t); o.stop(t + 1.3);
+    n.start(t); n.stop(t + 1.3);
+    o.onended = () => g.disconnect();
+    n.onended = () => { f.disconnect(); ng.disconnect(); };
   }
   blink() {
     if (!this.ctx) return;
