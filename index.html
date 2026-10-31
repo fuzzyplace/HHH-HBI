@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HHH Human Brain Interface</title>
+<link rel="stylesheet" href="/src/style.css">
+</head><body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row">
+    <b>HHH//HBI</b><span id="status">SIM</span><span id="bpm">♥ --</span><span id="batt">🔋 --</span>
+  </div>
+  <div id="bars"></div>
+  <div class="row btns">
+    <button id="connect">Connect Muse 2</button>
+    <button id="audio">Start Audio</button>
+    <button id="snap">Snapshot</button>
+    <button id="clear">Clear</button>
+    <button id="hide">Hide HUD (H)</button>
+  </div>
+  <div class="row btns" id="simbtns">
+    <span>SIM:</span>
+    <button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button>
+  </div>
+  <div id="msg"></div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body></html>
