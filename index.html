@@ -25,15 +25,19 @@
   <button id="replaystop">Stop (Esc)</button>
 </div>
 <div id="hud" class="dock" role="region" aria-label="Controls and key">
-  <div class="dock-top">
-    <b class="glitch brand" data-t="HHH//HBI">HHH//HBI</b>
+  <header class="bar">
+    <b class="brand" aria-label="HHH Human Brain Interface">HHH<i>//</i>HBI</b>
     <span id="status" class="chip">SIM</span>
     <span id="bpm" class="chip" title="looking for a pulse">♥ --</span>
-    <span id="batt" class="chip">🔋 --</span>
-    <span id="step" class="step">Connect your Muse</span>
-  </div>
+    <span id="batt" class="chip" hidden></span>
+    <span id="step" class="step" role="status">Connect a Muse 2 headband</span>
+    <span class="cta">
+      <button id="alt" class="link" hidden></button>
+      <button id="next" class="primary">Connect Muse</button>
+    </span>
+  </header>
 
-  <div class="dock-mid">
+  <section class="readout">
     <svg id="sensormap" viewBox="0 0 100 100" role="img" aria-label="Sensor contact map, top view, nose up">
       <path class="hm-nose" d="M44 12 L50 3 L56 12"/>
       <ellipse class="hm-ear" cx="11" cy="56" rx="4" ry="9"/>
@@ -44,65 +48,87 @@
       <circle id="s-AF8" class="q-off" cx="70" cy="20" r="5.5"/>
       <circle id="s-TP9" class="q-off" cx="13" cy="62" r="5.5"/>
       <circle id="s-TP10" class="q-off" cx="87" cy="62" r="5.5"/>
-      <text x="30" y="33" text-anchor="middle">AF7</text>
-      <text x="70" y="33" text-anchor="middle">AF8</text>
-      <text x="17" y="78" text-anchor="middle">TP9</text>
-      <text x="83" y="78" text-anchor="middle">TP10</text>
+      <text x="30" y="34" text-anchor="middle">AF7</text>
+      <text x="70" y="34" text-anchor="middle">AF8</text>
+      <text x="17" y="80" text-anchor="middle">TP9</text>
+      <text x="83" y="80" text-anchor="middle">TP10</text>
     </svg>
 
     <div id="key" aria-label="Band key">
-      <div class="krow" data-band="delta"><i class="sw" style="--c:#8a4dff"></i><span class="kn">delta</span><span class="kh">1–4 Hz</span><span class="kd">deep rest, slow rhythm</span><span class="kt"><i id="kb-delta"></i></span></div>
-      <div class="krow" data-band="theta"><i class="sw" style="--c:#ff2bd6"></i><span class="kn">theta</span><span class="kh">4–8 Hz</span><span class="kd">drowsy, dreamy, drifting</span><span class="kt"><i id="kb-theta"></i></span></div>
-      <div class="krow" data-band="alpha"><i class="sw" style="--c:#00fff0"></i><span class="kn">alpha</span><span class="kh">8–13 Hz</span><span class="kd">relaxed, eyes-closed calm</span><span class="kt"><i id="kb-alpha"></i></span></div>
-      <div class="krow" data-band="beta"><i class="sw" style="--c:#ffb000"></i><span class="kn">beta</span><span class="kh">13–30 Hz</span><span class="kd">alert, active attention</span><span class="kt"><i id="kb-beta"></i></span></div>
-      <div class="krow" data-band="gamma"><i class="sw" style="--c:#ffffff"></i><span class="kn">gamma</span><span class="kh">30–44 Hz</span><span class="kd">fast activity — on Muse often muscle</span><span class="kt"><i id="kb-gamma"></i></span></div>
+      <div class="krow" data-band="delta" title="delta 1–4 Hz · deep rest, slow rhythm"><i class="sw"></i><span class="kn">delta</span><span class="kh">1–4</span><span class="kt"><i id="kb-delta"></i></span></div>
+      <div class="krow" data-band="theta" title="theta 4–8 Hz · drowsy, dreamy, drifting"><i class="sw"></i><span class="kn">theta</span><span class="kh">4–8</span><span class="kt"><i id="kb-theta"></i></span></div>
+      <div class="krow" data-band="alpha" title="alpha 8–13 Hz · relaxed, eyes-closed calm"><i class="sw"></i><span class="kn">alpha</span><span class="kh">8–13</span><span class="kt"><i id="kb-alpha"></i></span></div>
+      <div class="krow" data-band="beta" title="beta 13–30 Hz · alert, active attention"><i class="sw"></i><span class="kn">beta</span><span class="kh">13–30</span><span class="kt"><i id="kb-beta"></i></span></div>
+      <div class="krow" data-band="gamma" title="gamma 30–44 Hz · fast activity; on the Muse often muscle"><i class="sw"></i><span class="kn">gamma</span><span class="kh">30–44</span><span class="kt"><i id="kb-gamma"></i></span></div>
     </div>
 
     <div id="meters">
-      <div class="meter"><span>RELAX</span><span class="mt"><i id="m-relax"></i></span><b id="v-relax">--</b></div>
-      <div class="meter"><span>FOCUS</span><span class="mt"><i id="m-focus"></i></span><b id="v-focus">--</b></div>
-      <div id="breathui" class="meter" hidden role="status" aria-live="polite"><span>SYNC</span><span class="mt"><i id="m-sync"></i></span><b id="v-sync"></b><b id="breathword"></b></div>
-      <p class="mnote">ink colour = band · ink source = sensor · water motion = heartbeat</p>
+      <div class="meter" title="relax: your calm level against your calibrated range"><span>Relax</span><span class="mt"><i id="m-relax"></i></span><b id="v-relax">--</b></div>
+      <div class="meter" title="focus: your activation level against your calibrated range"><span>Focus</span><span class="mt"><i id="m-focus"></i></span><b id="v-focus">--</b></div>
+      <div id="breathui" class="meter" hidden role="status" aria-live="polite" title="how closely your heart rhythm follows the machine's breath"><span>Sync</span><span class="mt"><i id="m-sync"></i></span><b id="v-sync"></b><b id="breathword"></b></div>
     </div>
+  </section>
+
+  <nav class="controls" aria-label="Controls">
+    <div id="views" class="seg" role="group" aria-label="View">
+      <button data-view="ink" title="INK: fluid ink and injector arms (V cycles views)">Ink</button>
+      <button data-view="spray" title="SPRAY: particle spray (V)">Spray</button>
+      <button data-view="orbs" title="ORBS: calm 3D orbs (V)">Orbs</button>
+      <button data-view="paint" title="PAINT: feedback paint (V)">Paint</button>
+    </div>
+    <div class="grp" role="group" aria-label="Modes">
+      <button id="playbtn" title="Play: your head stirs, blink drops ink, clench ripples (J)" aria-pressed="false">Play</button>
+      <button id="breathbtn" title="Breathe with the machine at 5.5 breaths a minute (B)" aria-pressed="false">Breathe</button>
+      <button id="musicbtn" title="Groove: heart-locked tech house instead of the band chord (N)" aria-pressed="false">Groove</button>
+    </div>
+    <div class="grp icons" role="group" aria-label="Utilities">
+      <button id="mute" class="icon" title="Sound (M)" aria-label="Mute sound" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="on" d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="off" d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></svg>
+      </button>
+      <button id="snap" class="icon" title="Snapshot (S)" aria-label="Save a snapshot">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      </button>
+      <button id="morebtn" class="icon" title="More: device, sessions, tools" aria-label="More controls" aria-expanded="false" aria-controls="more">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <div id="more" hidden>
+    <div class="row" role="group" aria-label="Device">
+      <span class="lbl">Device</span>
+      <button id="connect">Connect Muse</button>
+      <button id="calib" title="Calibrate (C)">Calibrate</button>
+      <span id="simbtns" class="grp" role="group" aria-label="Simulator mode"><button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button></span>
+    </div>
+    <div class="row" id="sessbtns" role="group" aria-label="Session">
+      <span class="lbl">Session</span>
+      <label class="sel"><span class="vh">Eyes-closed length</span><select id="medlen" title="eyes-closed length">
+        <option value="1">1 min</option><option value="3" selected>3 min</option><option value="5">5 min</option><option value="10">10 min</option>
+      </select></label>
+      <button id="session" title="Guided session, recorded (R)">Begin session</button>
+      <label class="sel"><span class="vh">Recorded sessions</span><select id="sessions" title="recorded sessions"></select></label>
+      <button id="replay" title="Play back the selected session (P)">Play back</button>
+      <button id="export" title="Download the selected session as JSON">Export</button>
+      <button id="delsession" title="Delete the selected session from this browser">Delete</button>
+    </div>
+    <div class="row" role="group" aria-label="Tools">
+      <span class="lbl">Tools</span>
+      <button id="mode" title="Glitch synth over PAINT (G)">Glitch</button>
+      <button id="labbtn" title="Signal Lab: live spectrum (L)">Signal Lab</button>
+      <button id="clear" title="Clear the canvas">Clear</button>
+      <button id="hide" title="Hide all controls (H)">Hide controls</button>
+    </div>
+    <p class="fine"><span id="rates"></span><span id="privacy" title="Anonymous, cookieless usage counts (which views and modes get used). Brain, heart and session data never leave this browser. Opt out: Global Privacy Control / Do Not Track.">your signals stay on this device</span><span class="keys">keys · V view · J play · B breathe · N groove · M sound · R session · P playback · C calibrate · H hide</span></p>
   </div>
 
-  <div class="dock-btns">
-    <button id="connect">Connect Muse</button>
-    <button id="calib">Calibrate (C)</button>
-    <button id="mute">Mute (M)</button>
-    <button id="view">View: INK (V)</button>
-    <button id="mode">Glitch (G)</button>
-    <button id="playbtn">Play (J)</button>
-    <button id="breathbtn">Breathe (B)</button>
-    <button id="musicbtn">Music: CHORD (N)</button>
-    <button id="snap">Snapshot (S)</button>
-    <button id="labbtn">Signal Lab (L)</button>
-    <button id="clear">Clear</button>
-    <button id="hide">Hide (H)</button>
-  </div>
-  <div class="dock-btns" id="sessbtns" role="group" aria-label="Session">
-    <span class="dim">SESSION</span>
-    <label class="sel"><span class="vh">Eyes-closed length</span><select id="medlen" title="eyes-closed length">
-      <option value="1">1 min</option><option value="3" selected>3 min</option><option value="5">5 min</option><option value="10">10 min</option>
-    </select></label>
-    <button id="session">Begin session (R)</button>
-    <button id="replay">Play back (P)</button>
-    <label class="sel"><span class="vh">Recorded sessions</span><select id="sessions" title="recorded sessions"></select></label>
-    <button id="export">Export</button><button id="delsession" title="Delete the selected session from this browser">Delete</button>
-  </div>
-  <div class="dock-btns" id="simbtns">
-    <span class="dim">SIM</span>
-    <button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button>
-  </div>
-
-  <div class="dock-foot">
-    <span id="msg" aria-live="polite"></span>
-    <span id="soundhint" hidden>tap anywhere to enable sound</span>
-    <span id="rates" class="dim"></span>
-    <span id="privacy" class="dim" title="Anonymous, cookieless usage counts (which views and modes get used). Brain, heart and session data never leave this browser. Opt out: Global Privacy Control / Do Not Track.">your signals stay on this device</span>
-  </div>
 </div>
+<footer class="note">
+  <span id="msg" aria-live="polite"></span>
+  <span id="soundhint" hidden>tap anywhere for sound</span>
+</footer>
 </div>
+<button id="showdock" hidden aria-label="Show controls">controls</button>
 
 <div id="calov" hidden>
   <div class="calbox">
