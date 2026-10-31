@@ -41,7 +41,8 @@ Never sent: EEG/PPG values, bands, heart rate, session contents, device names/ID
 Guard: each event ≤20 per page load, ≤150 total. Opt-out: GPC, Do Not Track, or `localStorage.hbi.notrack = '1'`.
 
 ## Dashboard (vercel.com → project)
-- Web Analytics and Speed Insights: enabled (verified via API on first deploy).
+- Web Analytics: enabled 2026-10-31 (`vercel project web-analytics enable hhh-hbi`; it asks for confirmation). Speed Insights: the free tier is collecting; `vercel project speed-insights enable` only turns on Speed Insights Plus, which needs Pro.
+- **Vercel MCP** (`https://mcp.vercel.com`, user scope): signed in with STDClub team access. Ask Claude for deployments, logs, page views and referrers.
 - **Firewall**: Bot Protection = Challenge (live since 2026-10-31; browsers and verified bots pass, scripts like plain `curl` get 429). DDoS mitigation on by default. Under attack: `vercel firewall attack-mode`. Check traffic: `vercel firewall overview`.
 - **Settings → Spend Management**: set a cap/alerts (bandwidth abuse on a static site).
 - **Git**: connected to `fuzzyplace/HHH-HBI` (2026-10-31). Push to `main` deploys production; other branches get preview URLs (behind Vercel login).
