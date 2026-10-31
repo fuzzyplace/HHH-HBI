@@ -10,6 +10,19 @@
 <canvas id="cink" hidden></canvas>
 <canvas id="carms" aria-hidden="true"></canvas>
 
+<div id="sessov" hidden role="status" aria-live="polite">
+  <div class="sesshead"><span id="sessphase">EYES OPEN · 1 OF 3</span><button id="sessend">End (Esc)</button></div>
+  <b id="sesscount"></b>
+  <p id="sesstxt"></p>
+  <div class="sessbar"><i id="sessfill"></i></div>
+</div>
+
+<div id="dockwrap">
+<div id="replaybar" hidden role="region" aria-label="Session playback">
+  <span id="replaylabel">Playback</span>
+  <div class="reptrack"><i id="replayfill"></i><span id="replaymarks"></span></div>
+  <button id="replaystop">Stop (Esc)</button>
+</div>
 <div id="hud" class="dock" role="region" aria-label="Controls and key">
   <div class="dock-top">
     <b class="glitch brand" data-t="HHH//HBI">HHH//HBI</b>
@@ -62,6 +75,16 @@
     <button id="clear">Clear</button>
     <button id="hide">Hide (H)</button>
   </div>
+  <div class="dock-btns" id="sessbtns" role="group" aria-label="Session">
+    <span class="dim">SESSION</span>
+    <label class="sel"><span class="vh">Eyes-closed length</span><select id="medlen" title="eyes-closed length">
+      <option value="1">1 min</option><option value="3" selected>3 min</option><option value="5">5 min</option><option value="10">10 min</option>
+    </select></label>
+    <button id="session">Begin session (R)</button>
+    <button id="replay">Play back (P)</button>
+    <label class="sel"><span class="vh">Recorded sessions</span><select id="sessions" title="recorded sessions"></select></label>
+    <button id="export">Export</button>
+  </div>
   <div class="dock-btns" id="simbtns">
     <span class="dim">SIM</span>
     <button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button>
@@ -72,6 +95,7 @@
     <span id="soundhint" hidden>tap anywhere to enable sound</span>
     <span id="rates" class="dim"></span>
   </div>
+</div>
 </div>
 
 <div id="calov" hidden>

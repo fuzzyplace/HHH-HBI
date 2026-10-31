@@ -20,6 +20,14 @@ What each signal is and how far to trust it: `docs/SIGNALS.md`. Design rule: **a
 | Blink / clench / motion artifact | events, 800ms refractory; holds (blink: forehead pair, clench/motion: all) | the held sensor's arm glitches (RGB-split ghosts, jitter, scanlines, stuttering light) and its ink pauses; motion glitches all arms; blink → small disturbance at forehead sites | band-passed noise burst |
 | Battery | % | dock | — |
 
+**v0.6 additions (INK depth + PAINT impasto):**
+- Head tilt → INK window-camera parallax (eye slides ≤1.2R, pool plane pinned 1:1 so nozzles stay on their sites; frozen when not live).
+- Heartbeat → INK 7% camera dolly breath per beat; cortex hologram scan sweep follows beatPhase × beatConf (only with a lock). PAINT impasto paint is laid only during beat flow; thickness accumulates (~0.5%/s thinning) with a lit oil sheen; Clear wipes.
+- 4 EEG sensors → INK holographic cortex under the water, lit under each sensor by its dominant-band colour × level × quality (dark when inactive / not live). Per-site band weights normalised + sharpened (level⁴) so the dominant band owns the hue; total dose unchanged.
+- Fluid velocity (from heartbeat) → suspended motes in 3 depth layers drift only with the water.
+- Bands → PAINT particle pigment share ∝ band level²; dabs snap to band pigments.
+- Changed: relax no longer sets the PAINT palette mood (it still drives trails and drag).
+
 (Removed in v0.5: left/right asymmetry → stereo pan — it would smear the binaural pairs.)
 
 Calibration cues: one soft tone at step 1→2, two rising tones at the end (audio on).

@@ -9,6 +9,8 @@ import { DataRain } from './rain.js';
 
 const DEBUG = new URLSearchParams(location.search).get('debug');
 // electrode attractor positions (x,y,z): TP9, AF7, AF8, TP10
+// band pigments δ θ α β γ (dock key #8a4dff #ff2bd6 #00fff0 #ffb000 #ffffff, linear-ish)
+const BAND_RGB = [[0.54, 0.30, 1.0], [1.0, 0.17, 0.84], [0.0, 1.0, 0.94], [1.0, 0.69, 0.0], [0.85, 0.88, 0.95]];
 const NODES = [[-1.7, -0.9, 0.3], [-1.0, 1.1, 0.8], [1.0, 1.1, 0.8], [1.7, -0.9, 0.3]];
 
 export class GpuScene {
@@ -40,6 +42,9 @@ export class GpuScene {
       rain: uniform(0.2), flash: uniform(0), aspect: uniform(innerWidth / innerHeight), shift: uniform(0.002),
       beat: uniform(0), aim: uniform(new THREE.Vector3()),   // beat=brightness swell; aim=head-tilt paint emitter target
       flow: uniform(0),   // 0..1 motion gate: particles only move after real heartbeats
+      cum: uniform(new THREE.Vector4(0.2, 0.4, 0.6, 0.8)),   // cumulative band shares δ θ α β (γ = rest): particle colour mix
+      deposit: uniform(0), paintKeep: uniform(1),           // impasto: paint laid per frame (beat flow), height persistence
+      ptexel: uniform(new THREE.Vector2(1, 1)),
     });
     this.attrVecs = NODES.map(([x, y, z]) => new THREE.Vector4(x, y, z, 0.5));
     const attr = uniformArray(this.attrVecs, 'vec4');
@@ -81,9 +86,12 @@ export class GpuScene {
     mat.positionNode = pos.toAttribute();
     const speed = vel.toAttribute().length();
     const k = clamp(speed.mul(0.45), 0, 1);
-    const calm = mix(vec3(0.0, 0.95, 1.0), vec3(0.45, 0.2, 1.0), k);   // cyan → violet
-    const hot = mix(vec3(1.0, 0.08, 0.65), vec3(1.0, 0.62, 0.05), k);  // magenta → amber
-    const col = mix(mix(hot, calm, U.mood), vec3(1.0), smoothstep(4.0, 9.0, speed));
+    // each particle carries one band's pigment; the share of particles per band follows the live band levels
+    // (δ violet, θ magenta, α cyan, β amber, γ white — same key as the dock and INK)
+    const hb = hash(float(instanceIndex).add(7.0));
+    const bandCol = mix(mix(mix(mix(vec3(...BAND_RGB[0]), vec3(...BAND_RGB[1]), step(U.cum.x, hb)),
+      vec3(...BAND_RGB[2]), step(U.cum.y, hb)), vec3(...BAND_RGB[3]), step(U.cum.z, hb)), vec3(...BAND_RGB[4]), step(U.cum.w, hb));
+    const col = bandCol.mul(float(0.75).add(k.mul(0.45)));
     const a = smoothstep(0.5, 0.0, uv().sub(0.5).length());
     // per-particle alpha scales inversely with count so density, not count, sets brightness
     mat.colorNode = vec4(col, a.mul(Math.min(0.6, 12000 / N)));
@@ -112,24 +120,77 @@ export class GpuScene {
     const sceneNode = texture(this.sceneRT.texture, u0);
     const rainNode = texture(this.rainTex, vec2(u0.x.add(gx.mul(0.3)), u0.y)).rgb;
     // max-blend keeps trails bounded (no runaway accumulation); small additive term lets overlaps glow
-    const fresh = sceneNode.rgb.add(rainNode.mul(U.rain));
+    // particle glints: dense overlaps sum toward white, so compress hue-preservingly (like INK) and keep them below white
+    const sL = max(max(sceneNode.r, sceneNode.g), sceneNode.b);
+    const sHue = pow(sceneNode.rgb.div(max(sL, 1e-4)), vec3(2.0));
+    const fresh = sHue.mul(float(1).sub(sL.mul(-1.5).exp())).mul(0.75).add(rainNode.mul(U.rain));
     const fbCol = max(this.prevNode.rgb.mul(U.decay), fresh).add(fresh.mul(0.15))
       .add(vec3(0, 1, 0.9).mul(U.flash.mul(0.12)));
     const fbMat = new THREE.NodeMaterial();
     fbMat.fragmentNode = vec4(min(fbCol, vec3(2)), 1);
     this.quad = new THREE.QuadMesh(fbMat);
 
+    // ---------- impasto: persistent pigment + height, laid by the particles while the water moves (beats) ----------
+    // rgb = top pigment colour, a = paint thickness. No zoom/smear: strokes stay where they were laid and pile up.
+    this.paintA = new THREE.RenderTarget(1, 1, rtOpts);
+    this.paintB = new THREE.RenderTarget(1, 1, rtOpts);
+    this.paintPrev = texture(this.paintA.texture, u0);
+    // brush: dilate the particle layer (brightest of 5 taps) so each particle leaves a dab, not a pixel;
+    // only dense flow (several particles overlapping) lays paint, so strokes form along the streams instead of speckle
+    const bt = U.ptexel.mul(1.8), bd = bt.mul(0.7071);
+    let dep = texture(this.sceneRT.texture, u0).rgb;
+    for (const o of [vec2(bt.x, 0), vec2(bt.x.negate(), 0), vec2(0, bt.y), vec2(0, bt.y.negate()),
+      vec2(bd.x, bd.y), vec2(bd.x.negate(), bd.y), vec2(bd.x, bd.y.negate()), vec2(bd.x.negate(), bd.y.negate())]) {
+      const t = texture(this.sceneRT.texture, u0.add(o)).rgb;
+      dep = mix(dep, t, step(max(max(dep.r, dep.g), dep.b), max(max(t.r, t.g), t.b)));
+    }
+    const dmax = max(max(dep.r, dep.g), dep.b);
+    const amt = smoothstep(0.08, 0.5, dmax).mul(U.deposit);
+    const ph = this.paintPrev.a;
+    const nh = ph.add(amt.mul(max(float(1).sub(ph.div(1.4)), 0)));            // soft cap: thick paint stops growing
+    const cov = clamp(amt.mul(5).div(ph.add(amt.mul(5)).add(0.03)), 0, 1);    // fresh paint covers old by its share
+    // pigment: overlapping particles sum toward pale mixes; snap each dab to the nearest band pigment (mostly) so
+    // strokes read in the band key's colours rather than lavender/white
+    const hue = dep.div(max(dmax, 1e-4)), hn = hue.normalize();
+    let best = vec3(...BAND_RGB[0]), bestS = hn.dot(vec3(...BAND_RGB[0]).normalize());
+    for (let i = 1; i < 5; i++) {
+      // γ's pigment is white: only near-neutral dabs snap to it, so pale mixes don't masquerade as gamma
+      const c = vec3(...BAND_RGB[i]), sc = hn.dot(c.normalize()).sub(i === 4 ? 0.06 : 0), w = step(bestS, sc);
+      best = mix(best, c, w); bestS = max(bestS, sc);
+    }
+    const nrgb = mix(this.paintPrev.rgb, mix(hue, best, 0.8), cov);
+    const paintMat = new THREE.NodeMaterial();
+    paintMat.fragmentNode = vec4(nrgb, nh.mul(U.paintKeep));
+    this.paintQuad = new THREE.QuadMesh(paintMat);
+    // lit display: normal from thickness gradient → oil sheen
+    const pt = U.ptexel;
+    this.paintRead = [u0, u0.add(vec2(pt.x, 0)), u0.sub(vec2(pt.x, 0)), u0.add(vec2(0, pt.y)), u0.sub(vec2(0, pt.y))].map(q => texture(this.paintB.texture, q));
+    const [pC, pR, pL, pT, pB] = this.paintRead;
+    const pn = vec3(pL.a.sub(pR.a).mul(5), pB.a.sub(pT.a).mul(5), 1).normalize();
+    const Ld = vec3(-0.45, 0.6, 0.66).normalize();
+    const diff = clamp(pn.dot(Ld), 0, 1).mul(0.6).add(0.45);
+    const spec = pow(clamp(pn.dot(Ld.add(vec3(0, 0, 1)).normalize()), 0, 1), 36).mul(smoothstep(0.03, 0.35, pC.a)).mul(0.3);
+    const cover = smoothstep(0.0, 0.06, pC.a);
+    // kept under the tone-mapper's highlight knee (Neutral desaturates above ~0.8) so pigment stays saturated
+    const paintLit = pC.rgb.mul(cover).mul(diff).mul(float(0.42).add(smoothstep(0.0, 0.8, pC.a).mul(0.28))).add(vec3(spec));
+
     // ---------- post: bloom → rgb split → scanlines/vignette/grain ----------
     this.outNode = texture(this.fbB.texture);
     this.bloomNode = bloom(this.outNode, 0.8, 0.45, 0.35);
-    const shifted = rgbShift(this.outNode.add(this.bloomNode), U.shift);
+    // paint is the body; the glowing particle/rain feedback rides on top a little softer so strokes stay readable
+    // (where paint is thick the glints mostly sit back, so additive mixing doesn't wash pigment to white)
+    const glowK = float(1).sub(cover.mul(0.75));
+    const shifted = rgbShift(paintLit.add(this.outNode.mul(glowK.mul(0.55))).add(this.bloomNode.mul(glowK.mul(0.5))), U.shift);
     const s = screenUV;
     const scan = float(0.84).add(sin(s.y.mul(screenSize.y).mul(1.7)).mul(0.16));
     const vig = smoothstep(1.15, 0.35, s.sub(0.5).length().mul(1.4));
     const grain = hash(floor(s.x.mul(screenSize.x)).add(floor(s.y.mul(screenSize.y)).mul(4099)).add(floor(time.mul(60)).mul(7919))).sub(0.5).mul(0.05);
     // beat brightness swell is a capped multiply (max +32%) — readable across a room, never a strobe
     const beatGain = float(1).add(U.beat.mul(0.32));
-    this.pipeline = new THREE.RenderPipeline(r, vec4(shifted.rgb.add(vec3(0, 1, 0.9).mul(U.flash.mul(0.18))).mul(scan).mul(vig).mul(beatGain).add(grain), 1));
+    if (DEBUG === 'height') this.pipeline = new THREE.RenderPipeline(r, vec4(vec3(pC.a), 1));   // ?debug=height: paint thickness
+    else if (DEBUG === 'glow') this.pipeline = new THREE.RenderPipeline(r, vec4(this.outNode.rgb, 1));
+    else if (DEBUG === 'paint') this.pipeline = new THREE.RenderPipeline(r, vec4(paintLit, 1));   // ?debug=paint: impasto layer only
+    else this.pipeline = new THREE.RenderPipeline(r, vec4(shifted.rgb.add(vec3(0, 1, 0.9).mul(U.flash.mul(0.18))).mul(scan).mul(vig).mul(beatGain).add(grain), 1));
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -141,12 +202,22 @@ export class GpuScene {
     r.setPixelRatio(this.pr); r.setSize(w, h, false);
     const pw = Math.max(1, Math.floor(w * this.pr)), ph = Math.max(1, Math.floor(h * this.pr));
     for (const rt of [this.sceneRT, this.fbA, this.fbB]) rt.setSize(pw, ph);
+    // the painting keeps its own resolution (CSS px, ≤1x) so the perf safeguard dropping pr never wipes it
+    const qw = Math.max(1, Math.floor(w * Math.min(1, devicePixelRatio || 1))), qh = Math.max(1, Math.floor(h * Math.min(1, devicePixelRatio || 1)));
+    if (this.paintA.width !== qw || this.paintA.height !== qh) {
+      for (const rt of [this.paintA, this.paintB]) rt.setSize(qw, qh);
+      this.u.ptexel.value.set(1 / qw, 1 / qh);
+    }
     this.cam.aspect = w / h; this.cam.updateProjectionMatrix();
     this.u.aspect.value = w / h;
   }
   clear() {
     const r = this.renderer;
-    for (const rt of [this.fbA, this.fbB]) { r.setRenderTarget(rt); r.clear(); }
+    // clear to alpha 0 explicitly: paint thickness lives in .a, and a renderer default of alpha 1 would leave a full-height canvas
+    const ca = r.getClearAlpha(); r.getClearColor(this._cc || (this._cc = new THREE.Color()));
+    r.setClearColor(0x000000, 0);
+    for (const rt of [this.fbA, this.fbB, this.paintA, this.paintB]) { r.setRenderTarget(rt); r.clear(); }
+    r.setClearColor(this._cc, ca);
     r.setRenderTarget(null); this.rain.clear();
   }
   onBeat() { this.beat = 1; this.drift = Math.min(1, this.drift + 0.5); }   // heartbeat: stepped forward surge + brightness swell + radial pressure
@@ -174,6 +245,11 @@ export class GpuScene {
     // (4) bands + per-channel = SECONDARY texture detail only (small coefficients)
     st.ch.forEach((c, i) => { let m = 0; for (const k in c) m = Math.max(m, c[k]); this.attrVecs[i].w = 0.15 + m * 0.5; });
     U.size.value = 0.02 + b.delta * 0.02;                  // particle grain, secondary
+    // band levels → share of pigment per band (squared so the dominant band leads; every band keeps its colour)
+    {
+      const w0 = b.delta ** 2, w1 = b.theta ** 2, w2 = b.alpha ** 2, w3 = b.beta ** 2, w4 = b.gamma ** 2, ws = w0 + w1 + w2 + w3 + w4;
+      if (ws > 1e-6) U.cum.value.set(w0 / ws, (w0 + w1) / ws, (w0 + w1 + w2) / ws, (w0 + w1 + w2 + w3) / ws);
+    }
     U.freq.value = 0.3 + b.theta * 0.5 + F * 0.3;          // noise detail, mostly secondary
     U.rain.value = 0.05 + b.gamma * 0.2;                   // data-rain density, secondary
     U.smear.value = (0.001 + b.theta * 0.004) * Math.min(dt * 60, 3) * flow;
@@ -183,7 +259,7 @@ export class GpuScene {
     U.glitch.value = Math.min(0.9, F * 0.5 * flow + this.flash * 0.7);
     U.shift.value = 0.0012 + F * 0.004 + this.flash * 0.02;
 
-    // (1) RELAX → palette/mood + trail length + laminar flow (drag). mood=1 → calm cyan/violet, 0 → hot amber/magenta
+    // (1) RELAX → trail length + laminar flow (drag). (Colour is band-truthful now; mood kept as an eased index only.)
     U.mood.value += (R - U.mood.value) * Math.min(1, dt * 1.5);
     U.drag.value = 0.95 + R * 0.045;                       // more drag = laminar when calm
     const f60 = dt * 60;                                   // feedback params are per-60fps-frame; scale for real dt
@@ -213,8 +289,15 @@ export class GpuScene {
     this.prevNode.value = this.fbA.texture;
     r.setRenderTarget(this.fbB); this.quad.render(r);
     this.outNode.value = this.fbB.texture;
+    // impasto: lay paint only while the water moves (beat flow); ~0.5%/s thinning keeps very long sessions from saturating
+    U.deposit.value = flow * 0.08 * f60;
+    U.paintKeep.value = Math.pow(0.995, dt);
+    this.paintPrev.value = this.paintA.texture;
+    r.setRenderTarget(this.paintB); this.paintQuad.render(r);
+    for (const n of this.paintRead) n.value = this.paintB.texture;
     r.setRenderTarget(null); this.pipeline.render();
     [this.fbA, this.fbB] = [this.fbB, this.fbA];
+    { const t = this.paintA; this.paintA = this.paintB; this.paintB = t; }
 
     if (this.snapReq) { this.snapReq = false; save(this.canvas); }
     this.adapt(dt);

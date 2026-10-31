@@ -21,6 +21,9 @@ const MAXS = 32;            // splat slots per pass (20 streams + 8 pulse spokes
 const SIM_RES = 128;        // velocity grid, short side
 const DYE_RES = 512;        // dye grid, short side
 const PRESSURE_ITERS = 20;
+const MOTE_W = 64, MOTE_H = 24;   // 1536 suspended motes in 3 depth layers
+const CORTEX_RES = 384;
+const CAM_FOV = 30;               // must match arms.js FOV (pool plane maps 1:1 to CSS px)
 // head-map site angles (radians from nose, clockwise on screen) + radial scale; order = channel index, 4 = PPG
 const SITE_ANG = [-1.75, -0.55, 0.55, 1.75, 0];
 const SITE_RAD = [1.0, 1.0, 1.0, 1.0, 0.94];
@@ -119,43 +122,175 @@ const FS = {
       }
       o = vec4(min(c, vec3(6.0)), 1.0);
     }`,
-  // final image: near-black water, ink tone-mapped like dense pigment lit from below, soft glow,
-  // edge-only chromatic aberration, static scanlines (no time term: a still pool is truly still)
-  show: `uniform sampler2D uDye; uniform vec2 uDyeTexel; uniform vec2 uRes; uniform vec4 uHead; uniform float uOutline; uniform float uCA;
-    const vec2 G[8] = vec2[8](vec2(1,0), vec2(-1,0), vec2(0,1), vec2(0,-1), vec2(.7,.7), vec2(-.7,.7), vec2(.7,-.7), vec2(-.7,-.7));
+  // bright-ink extract for bloom (4-tap box downsample, ink tone curve, soft threshold)
+  bright: `uniform sampler2D uDye; uniform vec2 uDyeTexel;
+    vec3 tone(vec3 c){ float L = max(max(c.r, c.g), c.b); vec3 h = pow(c / max(L, 1e-4), vec3(1.6)); return h * (1.0 - exp(-L * 1.6)); }
     void main(){
-      vec2 uv = vUv, dc = uv - 0.5;
+      vec2 e = uDyeTexel * 1.5;
+      vec3 c = 0.25 * (texture(uDye, vUv + vec2(e.x, e.y)).rgb + texture(uDye, vUv - vec2(e.x, e.y)).rgb
+                     + texture(uDye, vUv + vec2(e.x, -e.y)).rgb + texture(uDye, vUv - vec2(e.x, -e.y)).rgb);
+      vec3 t = tone(c);
+      o = vec4(t * smoothstep(0.28, 0.9, max(max(t.r, t.g), t.b)), 1.0);
+    }`,
+  // separable 9-tap gaussian (5 linear fetches)
+  blur: `uniform sampler2D uSrc; uniform vec2 uDir;
+    void main(){
+      vec3 c = texture(uSrc, vUv).rgb * 0.2270270;
+      c += (texture(uSrc, vUv + uDir * 1.3846154).rgb + texture(uSrc, vUv - uDir * 1.3846154).rgb) * 0.3162162;
+      c += (texture(uSrc, vUv + uDir * 3.2307692).rgb + texture(uSrc, vUv - uDir * 3.2307692).rgb) * 0.0702703;
+      o = vec4(c, 1.0);
+    }`,
+  // one-off bake (on resize): procedural cortex seen from above, nose up. Head-local q in [-1.15,1.15]^2 (unit = head radii).
+  // out: normal.xy, gyrus ridge 0..1, dome height (0 outside the brain)
+  cortexBake: `
+    float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+    float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y) * 2.0 - 1.0; }
+    float dome(vec2 q){
+      vec2 p = q / vec2(0.86, 0.90); p.y += 0.04;
+      float hx = abs(p.x);
+      float rx = 1.0 - 0.16 * max(p.y, 0.0) + 0.04 * min(p.y, 0.0); // narrower frontal, wider occipital
+      vec2 e = vec2(p.x / rx, p.y);
+      float d = sqrt(max(0.0, 1.0 - dot(e, e)));
+      float fis = mix(0.25, 1.0, smoothstep(0.0, 0.07, hx));          // longitudinal fissure (a groove, not a gap)
+      return d * fis * smoothstep(0.0, 0.03, d);
+    }
+    float folds(vec2 q){
+      vec2 w = vec2(vn(q * 2.3), vn(q * 2.3 + 17.1)) * 0.42;
+      float a = 1.0 - abs(vn(q * 6.2 + w * 2.0));
+      float b = 1.0 - abs(vn(q * 12.5 + w * 3.0 + 5.3));
+      return pow(a, 3.0) * 0.72 + pow(b, 3.0) * 0.28;
+    }
+    float H(vec2 q){ float d = dome(q); return d * (0.80 + 0.20 * folds(q)) ; }
+    void main(){
+      vec2 q = (vUv * 2.0 - 1.0) * 1.15;
+      float e = 0.004, h = H(q);
+      vec2 g = vec2(H(q + vec2(e, 0.0)) - H(q - vec2(e, 0.0)), H(q + vec2(0.0, e)) - H(q - vec2(0.0, e))) / (2.0 * e);
+      vec3 n = normalize(vec3(-g * 0.18, 1.0));
+      o = vec4(n.xy, folds(q), dome(q));
+    }`,
+  // final image: deep water + machine floor + hologram cortex (all under the ink, refracted by it),
+  // ink as lit liquid (hue-saturated pigment, density-normal diffuse + specular sheen, subsurface bloom),
+  // edge-only chromatic aberration, static scanlines (no time term: a still pool is truly still)
+  show: `uniform sampler2D uDye, uBloom, uCortex; uniform vec2 uDyeTexel; uniform vec2 uRes; uniform vec4 uHead; uniform float uOutline; uniform float uCA;
+    uniform vec3 uCtx;            // cortex centre (px, after parallax) + scale (px per head-radius unit, y)
+    uniform float uCAsp;          // head rx / ry
+    uniform vec3 uFloor;          // floor centre (px) + scale
+    uniform vec3 uSC[4];          // per-sensor light colour (dominant-band colour x level x quality)
+    uniform vec2 uScan;           // heart-clock scan: phase, strength
+    uniform float uWake, uPr;
+    const vec2 SQ[4] = vec2[4](vec2(-0.984, -0.178), vec2(-0.523, 0.852), vec2(0.523, 0.852), vec2(0.984, -0.178));
+    float dens(vec2 p){ vec3 c = texture(uDye, p).rgb; return 1.0 - exp(-max(max(c.r, c.g), c.b) * 1.4); }
+    void main(){
+      vec2 uv = vUv, dc = uv - 0.5, px = uv * uRes;
       float ca = uCA * dot(dc, dc);
       vec3 c = vec3(texture(uDye, uv + dc * ca).r, texture(uDye, uv).g, texture(uDye, uv - dc * ca).b);
-      vec3 g = vec3(0.0);
-      for (int k = 0; k < 8; k++) g += texture(uDye, uv + G[k] * uDyeTexel * 9.0).rgb;
-      g *= 0.125;
-      // density gradient shading gives plumes volume (billowing body, darker folds)
-      float dl = length(texture(uDye, uv - vec2(uDyeTexel.x, 0.0)).rgb), dr = length(texture(uDye, uv + vec2(uDyeTexel.x, 0.0)).rgb);
-      float dt = length(texture(uDye, uv + vec2(0.0, uDyeTexel.y)).rgb), db = length(texture(uDye, uv - vec2(0.0, uDyeTexel.y)).rgb);
-      vec3 n = normalize(vec3(dr - dl, dt - db, 0.35));
-      float shade = clamp(0.72 + 0.45 * dot(n, normalize(vec3(-0.4, 0.6, 0.7))), 0.45, 1.25);
-      // hue-preserving saturation: dense ink stays its band colour instead of washing to white
-      float Lc = max(max(c.r, c.g), c.b), Lg = max(max(g.r, g.g), g.b);
-      vec3 ink = c * ((1.0 - exp(-Lc * 1.5)) / max(Lc, 1e-4)) * shade + g * ((1.0 - exp(-Lg * 0.9)) / max(Lg, 1e-4)) * 0.35;
-      // water: near-black with a faint cold depth gradient + vignette
-      vec2 px = uv * uRes;
-      float vig = smoothstep(1.25, 0.25, length(dc * vec2(uRes.x / uRes.y, 1.0)));
-      vec3 water = mix(vec3(0.004, 0.005, 0.010), vec3(0.012, 0.018, 0.030), vig);
-      vec3 col = water + ink * (0.55 + 0.45 * vig);
+      float Lc = max(max(c.r, c.g), c.b);
+      float thick = 1.0 - exp(-Lc * 1.4);
+      // liquid surface normal from the (saturating) density field
+      vec2 e = uDyeTexel * 1.5;
+      float dl = dens(uv - vec2(e.x, 0.0)), dr = dens(uv + vec2(e.x, 0.0)), dt = dens(uv + vec2(0.0, e.y)), db = dens(uv - vec2(0.0, e.y));
+      vec3 n = normalize(vec3((dl - dr) * 2.2, (db - dt) * 2.2, 1.0));
+      vec2 refr = n.xy * 26.0 * uPr * (0.25 + thick);                 // what lies beneath bends through the ink
+      // ---- beneath: deep-water gradient + faint machine floor grid (deepest layer, strongest parallax) ----
+      vec2 bp = px + refr;
+      float asp = uRes.x / uRes.y;
+      float vig = smoothstep(1.3, 0.2, length(dc * vec2(asp, 1.0)));
+      vec3 water = mix(vec3(0.002, 0.003, 0.008), vec3(0.010, 0.020, 0.040), vig);
+      vec2 fq = (bp - uFloor.xy) / uFloor.z;
+      vec2 gq = abs(fract(fq * 3.0) - 0.5);
+      float grid = 1.0 - smoothstep(0.0, 3.0 * fwidth(fq.x) * 1.4, min(gq.x, gq.y));
+      water += vec3(0.0, 0.10, 0.14) * grid * 0.18 * smoothstep(2.2, 0.4, length(fq)) * (0.35 + 0.65 * uWake);
+      // ---- hologram cortex ----
+      vec2 q = (bp - uCtx.xy) / uCtx.z; q.x /= uCAsp;
+      vec3 holo = vec3(0.0);
+      if (uWake > 0.001 && abs(q.x) < 1.15 && abs(q.y) < 1.15) {
+        vec4 cx = texture(uCortex, q / 2.3 + 0.5);
+        float m = smoothstep(0.0, 0.12, cx.w);
+        vec3 N = vec3(cx.xy, sqrt(max(0.0, 1.0 - dot(cx.xy, cx.xy))));
+        float fres = pow(1.0 - N.z, 1.5) + 0.35 * (1.0 - smoothstep(0.0, 0.25, cx.w));
+        float ridge = cx.z;
+        vec3 acc = vec3(0.0);
+        for (int i = 0; i < 4; i++) {
+          vec2 d = q - SQ[i];
+          float fall = exp(-dot(d, d) * 1.5);
+          acc += uSC[i] * fall * (0.3 + max(dot(N, normalize(vec3(-d, 0.6))), 0.0));
+        }
+        float scan = 0.78 + 0.22 * step(0.5, fract(px.y / (3.0 * uPr)));   // static hologram raster
+        float sweep = uScan.y * exp(-pow((q.y - (1.1 - 2.2 * uScan.x)) * 6.0, 2.0));
+        holo = (vec3(0.03, 0.30, 0.42) * (fres * 0.8 + ridge * 0.10) + acc * (0.22 + 1.1 * fres + 0.55 * ridge)
+              + vec3(0.5, 0.9, 1.0) * sweep * (0.15 + ridge) * 0.35) * m * scan * uWake;
+      }
+      vec3 beneath = (water + holo * 0.5) * exp(-Lc * 2.2);           // ink absorbs what is below it
+      // ---- ink: hue-preserving saturation (dominant channel kept, minor channels pushed down) ----
+      vec3 hue = pow(c / max(Lc, 1e-4), vec3(1.6));
+      vec3 Ld = normalize(vec3(-0.45, 0.6, 0.75));
+      float diff = 0.62 + 0.5 * max(dot(n, Ld), 0.0);
+      float spec = pow(max(dot(n, normalize(Ld + vec3(0.0, 0.0, 1.0))), 0.0), 60.0) * smoothstep(0.05, 0.5, thick);
+      vec3 bl = texture(uBloom, uv).rgb;
+      vec3 ink = hue * thick * diff * (0.80 + 0.20 * vig)
+               + hue * thick * thick * 0.22                            // subsurface: dense cores glow from within
+               + bl * 0.85                                             // soft bloom on bright ink
+               + vec3(0.80, 0.92, 1.0) * spec * 0.55;                  // wet sheen
+      vec3 col = beneath + ink;
       // faint head map (live only): ellipse ring + nose tick
       if (uOutline > 0.0) {
-        vec2 q = (px - uHead.xy) / uHead.zw;
-        float e = abs(length(q) - 1.0) * min(uHead.z, uHead.w);
-        float ring = smoothstep(1.4, 0.0, e);
+        vec2 hq = (px - uHead.xy) / uHead.zw;
+        float he = abs(length(hq) - 1.0) * min(uHead.z, uHead.w);
+        float ring = smoothstep(1.4, 0.0, he);
         vec2 nq = px - (uHead.xy + vec2(0.0, uHead.w * 1.0));
         float nose = smoothstep(1.4, 0.0, abs(abs(nq.x) * 1.6 - (uHead.w * 0.09 - nq.y))) * step(0.0, nq.y) * step(nq.y, uHead.w * 0.09);
-        col += vec3(0.25, 0.85, 0.95) * (ring + nose) * 0.07 * uOutline;
+        col += vec3(0.25, 0.85, 0.95) * (ring + nose) * 0.06 * uOutline;
       }
+      col *= mix(0.55, 1.0, vig);
       col *= 0.95 + 0.05 * step(0.5, fract(px.y * 0.5));
       o = vec4(col, 1.0);
     }`,
+  // suspended motes: advected by the fluid velocity only (layer-scaled), never by themselves
+  moteAdv: `uniform sampler2D uPos, uVel; uniform vec2 uSimTexel; uniform float uDt;
+    void main(){
+      vec4 p = texture(uPos, vUv);
+      vec2 v = texture(uVel, p.xy).xy;
+      p.xy = fract(p.xy + v * uSimTexel * uDt * mix(1.0, 0.45, p.z));   // deeper layers lag the surface flow
+      o = p;
+    }`,
 };
+
+// mote sprites: one point per texel of the mote position texture (3 depth layers, window parallax)
+const MOTE_VS = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uPos, uDye;
+uniform int uW;
+uniform vec2 uCss;     // CSS px viewport
+uniform vec3 uCam;     // camera offset x/y (CSS px, y up) + distance to the pool plane
+uniform float uDepth;  // CSS px depth of the deepest layer
+uniform float uPr, uWake;
+out vec3 vCol; out float vA;
+void main(){
+  vec4 p = texelFetch(uPos, ivec2(gl_VertexID % uW, gl_VertexID / uW), 0);
+  float z = 0.12 + p.z * uDepth;                       // depth below the surface
+  float s = uCam.z / (uCam.z + z);                     // perspective scale of that layer
+  vec2 wp = (p.xy - 0.5) * uCss;
+  vec2 sp = uCam.xy * (1.0 - s) + wp * s;
+  gl_Position = vec4(sp / (uCss * 0.5), 0.0, 1.0);
+  vec3 d = texture(uDye, p.xy).rgb;
+  float L = max(max(d.r, d.g), d.b);
+  vec3 hue = pow(d / max(L, 1e-4), vec3(1.6)) * (1.0 - exp(-L * 2.0));
+  float near = 1.0 - p.z;
+  vCol = vec3(0.30, 0.55, 0.65) * 0.25 + hue * 1.3;    // lit by the ink they float in
+  vA = (0.10 + 0.32 * near * near) * (0.25 + 0.75 * fract(p.w * 7.31)) * uWake;
+  gl_PointSize = (1.0 + 3.2 * near * near) * uPr;
+}`;
+const MOTE_FS = `#version 300 es
+precision highp float;
+in vec3 vCol; in float vA;
+out vec4 o;
+void main(){
+  vec2 d = gl_PointCoord - 0.5;
+  float a = smoothstep(0.5, 0.0, length(d)) * vA;
+  o = vec4(vCol * a, 1.0);
+}`;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -163,9 +298,9 @@ function compile(gl, type, src) {
   if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('ink shader: ' + gl.getShaderInfoLog(s));
   return s;
 }
-function program(gl, vs, fsSrc) {
+function program(gl, vs, fsSrc, head = HEAD) {
   const p = gl.createProgram();
-  gl.attachShader(p, vs); gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, HEAD + fsSrc));
+  gl.attachShader(p, vs); gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, head + fsSrc));
   gl.bindAttribLocation(p, 0, 'aPos');
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('ink link: ' + gl.getProgramInfoLog(p));
@@ -188,10 +323,14 @@ export class InkView {
     this.fmtRG = this._format(gl.RG16F, gl.RG) || this.fmtRGBA;
     this.fmtR = this._format(gl.R16F, gl.RED) || this.fmtRG;
     if (!this.fmtRGBA) throw new Error('half-float render targets unavailable');
+    // mote positions want full float (half floats quantise slow drift away); half is an acceptable fallback
+    this.fmtPos = this._format(gl.RGBA32F, gl.RGBA, gl.FLOAT) || this.fmtRGBA;
 
     const vs = compile(gl, gl.VERTEX_SHADER, VS);
     this.P = {};
     for (const k in FS) this.P[k] = program(gl, vs, FS[k]);
+    this.P.motes = program(gl, compile(gl, gl.VERTEX_SHADER, MOTE_VS), '', MOTE_FS);
+    this.emptyVao = gl.createVertexArray();   // attribute-less point draw (gl_VertexID)
     // one big triangle covers the viewport
     this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao);
     const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
@@ -212,6 +351,26 @@ export class InkView {
     this.pulse = 0; this.pulseSeed = 0; this.blink = 0;
     this.ftAvg = 16; this.slow = 0; this.pr = Math.min(devicePixelRatio || 1, 1.25); this.iters = PRESSURE_ITERS;
     this.snapReq = false;
+    // depth + presence
+    this.wake = 0;                           // cortex/mote/floor visibility: 0 before live, eases to 1 when live
+    this.siteCol = new Float32Array(12);     // per-sensor cortex light (eased)
+    this.cam = { ox: 0, oy: 0, D: 1, Dk: 1 };   // shared window camera: pool plane pinned 1:1, everything off-plane parallaxes
+    this.breath = 0; this.breathS = 0;       // beat-only camera breathing envelope
+    this.bw = new Float32Array(20); this.siteT = new Float32Array(4);   // per-site band weights + total dose
+    this.moteN = MOTE_W * MOTE_H;
+    this.motes = this._double(MOTE_W, MOTE_H, this.fmtPos, true);
+    {
+      const init = new Float32Array(MOTE_W * MOTE_H * 4);
+      for (let i = 0; i < MOTE_W * MOTE_H; i++) {
+        init[i * 4] = Math.random(); init[i * 4 + 1] = Math.random();
+        init[i * 4 + 2] = [0.08, 0.5, 0.92][i % 3] + (Math.random() - 0.5) * 0.12;   // three depth layers
+        init[i * 4 + 3] = Math.random();
+      }
+      for (const f of [this.motes.read, this.motes.write]) {
+        gl.bindTexture(gl.TEXTURE_2D, f.tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, this.fmtPos.internal, MOTE_W, MOTE_H, 0, gl.RGBA, gl.FLOAT, init);
+      }
+    }
 
     this.arms = null;
     if (armsCanvas) {
@@ -224,32 +383,32 @@ export class InkView {
   }
 
   // ---------- GL resources ----------
-  _format(internal, format) {
+  _format(internal, format, type = this.gl.HALF_FLOAT) {
     const gl = this.gl, t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, internal, 4, 4, 0, format, gl.HALF_FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, 4, 4, 0, format, type, null);
     const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
     const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(f); gl.deleteTexture(t);
-    return ok ? { internal, format } : null;
+    return ok ? { internal, format, type } : null;
   }
-  _fbo(w, h, fmt) {
-    const gl = this.gl, tex = gl.createTexture();
+  _fbo(w, h, fmt, nearest = false) {
+    const gl = this.gl, tex = gl.createTexture(), filt = nearest ? gl.NEAREST : gl.LINEAR;
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, fmt.internal, w, h, 0, fmt.format, gl.HALF_FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, fmt.internal, w, h, 0, fmt.format, fmt.type, null);
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     gl.viewport(0, 0, w, h); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
     return { tex, fb, w, h, tx: 1 / w, ty: 1 / h };
   }
-  _double(w, h, fmt) {
-    const d = { read: this._fbo(w, h, fmt), write: this._fbo(w, h, fmt), swap() { const t = this.read; this.read = this.write; this.write = t; } };
+  _double(w, h, fmt, nearest = false) {
+    const d = { read: this._fbo(w, h, fmt, nearest), write: this._fbo(w, h, fmt, nearest), swap() { const t = this.read; this.read = this.write; this.write = t; } };
     return d;
   }
   _free(f) { if (!f) return; const gl = this.gl; gl.deleteTexture(f.tex); gl.deleteFramebuffer(f.fb); }
@@ -291,8 +450,19 @@ export class InkView {
       this.dye = this._double(dw, dh, this.fmtRGBA);
       if (old) { this._resample(old.read, this.dye.read); this._freeD(old); }
     }
+    // bloom chain at quarter of the drawing buffer
+    const bw = Math.max(1, Math.round(this.canvas.width / 4)), bh = Math.max(1, Math.round(this.canvas.height / 4));
+    if (!this.bloomA || this.bloomA.w !== bw || this.bloomA.h !== bh) {
+      this._free(this.bloomA); this._free(this.bloomB);
+      this.bloomA = this._fbo(bw, bh, this.fmtRGBA); this.bloomB = this._fbo(bw, bh, this.fmtRGBA);
+    }
+    if (!this.cortex) {   // static procedural cortex, baked once in head-local space
+      this.cortex = this._fbo(CORTEX_RES, CORTEX_RES, this.fmtRGBA);
+      const Q = this.P.cortexBake; this._use(Q, this.cortex); this._draw(this.cortex);
+    }
     this.aspect = w / h;
     this._layout(w, h);
+    this.cam.D = (h / 2) / Math.tan((CAM_FOV / 2) * Math.PI / 180); this.cam.Dk = this.cam.D;
     this.arms?.resize(w, h, this.sites, this.head);
   }
 
@@ -320,6 +490,7 @@ export class InkView {
     this.pulseSeed = Math.random() * Math.PI * 2;
     for (let i = 0; i < 4; i++) if (this.active[i]) this.dose[i] = 1;
     this.dose[4] = 1;
+    this.breath = Math.max(this.breath, s);
     this.arms?.onBeat(s, this.active);
   }
   onBlink() { if (this.live) this.blink = 1; }
@@ -340,18 +511,47 @@ export class InkView {
     this.outline += ((live ? 1 : 0) - this.outline) * Math.min(1, d * 1.5);
     if (!live) this.outline = 0;   // outline only while live
 
+    this.wake += ((live ? 1 : 0) - this.wake) * Math.min(1, d * (live ? 0.9 : 1.6));
+    if (this.wake < 0.002) this.wake = 0;
+
+    const W = this.bw, T = this.siteT, sc = this.siteCol, kc = Math.min(1, d * 2.5);
     for (let i = 0; i < 4; i++) {
       const q = st.quality?.[i], lab = q?.label;
       this.active[i] = live && (lab === 'good' || lab === 'noisy') && !st.held?.[i] ? 1 : 0;
       if (!this.active[i]) this.dose[i] = 0;
+      // per-site band weights, normalised + sharpened so the dominant band owns the hue (order and colour stay truthful);
+      // total dose stays proportional to summed band level x contact quality
+      let S = 0, sw = 0;
+      const ch = st.ch?.[i];
+      for (let b = 0; b < 5; b++) { const l = ch ? Math.max(0, (ch[BANDS[b]] || 0) - 0.04) : 0; W[i * 5 + b] = l; S += l; }
+      for (let b = 0; b < 5; b++) { const w = W[i * 5 + b] ** 4; W[i * 5 + b] = w; sw += w; }
+      for (let b = 0; b < 5; b++) W[i * 5 + b] = sw > 0 ? W[i * 5 + b] / sw : 0;
+      const qs = this.active[i] ? Math.max(0, Math.min(1, q.score ?? 0)) : 0;
+      T[i] = qs * Math.pow(S, 1.6);
+      // cortex light under this sensor: dominant-band colour x level x quality (eased; dark when inactive)
+      const lv = qs * Math.min(1, S * 1.4);
+      for (let k = 0; k < 3; k++) {
+        let c = 0; for (let b = 0; b < 5; b++) c += COL[b][k] * W[i * 5 + b];
+        sc[i * 3 + k] += (c * lv - sc[i * 3 + k]) * kc;
+      }
     }
 
-    if (live) this._step(st, d);
-    else this._fade(d);
-    this._show();
+    this.lockBpm = st.bpm || 0; this.beatPhase = st.beatPhase || 0; this.beatConf = st.beatConf || 0;
+    if (live) {
+      // window camera: head tilt (accel) slides the eye point; the pool plane stays pinned so nozzles stay on their sites.
+      // Frozen when not live (nothing moves before sync). Breathing = small dolly on real beats only.
+      const R = this.head.ry, kt = Math.min(1, d * 1.2), tl = st.tilt || ZERO3;
+      this.cam.ox += (Math.max(-1, Math.min(1, tl.x || 0)) * R * 1.2 - this.cam.ox) * kt;
+      this.cam.oy += (Math.max(-1, Math.min(1, tl.y || 0)) * R * 1.2 - this.cam.oy) * kt;
+      this.breath *= Math.exp(-d / 0.55);
+      this.breathS += (this.breath - this.breathS) * Math.min(1, d / 0.12);
+      this.cam.Dk = this.cam.D * (1 - 0.07 * this.breathS);
+      this._step(st, d);
+    } else this._fade(d);
+    this._composite();
     if (this.snapReq) { this.snapReq = false; this._save(); }
 
-    this.arms?.frame(st, d, this.dose, this.active);
+    this.arms?.frame(st, d, this.dose, this.active, this.cam);
     const decay = Math.exp(-d / 0.28);
     for (let i = 0; i < 5; i++) this.dose[i] *= decay;
     this._adapt(dt);
@@ -377,11 +577,11 @@ export class InkView {
     const jr = (Rn * 0.06) ** 2, sr = (Rn * 0.026) ** 2;
     for (let i = 0; i < 4; i++) {
       if (!this.active[i]) continue;
-      const q = Math.max(0, Math.min(1, st.quality[i].score ?? 0)), ch = st.ch[i];
+      const Wt = this.bw, Ti = this.siteT[i];
       const dx = this.dirs[i].x, dy = this.dirs[i].y, px = this.sites[i].x / this.cssW, py = 1 - this.sites[i].y / this.cssH;
       const dose = this.dose[i];
       for (let b = 0; b < 5; b++) {
-        const lvl = Math.pow(Math.max(0, (ch[BANDS[b]] || 0) - 0.04), 1.6) * q;   // contrast curve: dominant bands win the colour
+        const lvl = Ti * Wt[i * 5 + b] * 0.4;             // this band's share of the site's dose (normalised weights)
         const amt = lvl * (dose * 5.0 + trickle);        // burst on beat + very faint trickle (only with a heart lock)
         if (amt < 2e-4) continue;
         const a = (b - 2) * 0.36, ca = Math.cos(a), sa = Math.sin(a);
@@ -473,6 +673,12 @@ export class InkView {
     this._tex(Q, 'uVel', vel.read, 0); this._tex(Q, 'uSrc', this.dye.read, 1);
     gl.uniform1f(Q.u.uDiss, 0.05);
     this._draw(this.dye.write); this.dye.swap();
+
+    // ---- motes ride the (already advected) velocity field; zero velocity → they stay put ----
+    Q = P.moteAdv; this._use(Q, this.motes.read);
+    gl.uniform2f(Q.u.uSimTexel, vel.read.tx, vel.read.ty); gl.uniform1f(Q.u.uDt, dt);
+    this._tex(Q, 'uPos', this.motes.read, 0); this._tex(Q, 'uVel', vel.read, 1);
+    this._draw(this.motes.write); this.motes.swap();
   }
 
   /** not live: no stepping, no injection; ink holds still and fades to a black pool (half-life ~30s) */
@@ -482,24 +688,62 @@ export class InkView {
     this._draw(this.dye.write); this.dye.swap();
   }
 
-  _show(noOutline = false) {
-    const gl = this.gl, Q = this.P.show, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, s = W / this.cssW;
-    this._use(Q, this.dye.read);
-    this._tex(Q, 'uDye', this.dye.read, 0);
+  _composite(noOutline = false) {
+    const gl = this.gl, P = this.P, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, s = W / this.cssW;
+    // ---- bloom: bright ink → quarter res → separable blur ----
+    let Q = P.bright; this._use(Q, this.bloomA);
+    this._tex(Q, 'uDye', this.dye.read, 0); gl.uniform2f(Q.u.uDyeTexel, this.dye.read.tx, this.dye.read.ty);
+    this._draw(this.bloomA);
+    Q = P.blur; this._use(Q, this.bloomA);
+    this._tex(Q, 'uSrc', this.bloomA, 0); gl.uniform2f(Q.u.uDir, this.bloomA.tx * 1.5, 0); this._draw(this.bloomB);
+    this._tex(Q, 'uSrc', this.bloomB, 0); gl.uniform2f(Q.u.uDir, 0, this.bloomA.ty * 1.5); this._draw(this.bloomA);
+
+    // ---- camera projection of the layers beneath the surface (window parallax, same rig as the arms) ----
+    const C = this.cam, R = this.head.ry, cw2 = this.cssW / 2, ch2 = this.cssH / 2;
+    const sC = C.Dk / (C.Dk + R * 0.75);           // cortex sits ~0.75 head radii below the surface
+    const sF = C.Dk / (C.Dk + R * 2.6);            // machine floor, deepest
+    const hxw = this.head.x - cw2, hyw = ch2 - this.head.y;   // head centre in centred world px (y up)
+
+    Q = P.show; this._use(Q, this.dye.read);
+    this._tex(Q, 'uDye', this.dye.read, 0); this._tex(Q, 'uBloom', this.bloomA, 1); this._tex(Q, 'uCortex', this.cortex, 2);
     gl.uniform2f(Q.u.uDyeTexel, this.dye.read.tx, this.dye.read.ty);
     gl.uniform2f(Q.u.uRes, W, H);
     gl.uniform4f(Q.u.uHead, this.head.x * s, H - this.head.y * s, this.head.rx * s, this.head.ry * s);
     gl.uniform1f(Q.u.uOutline, noOutline ? 0 : this.outline);
     gl.uniform1f(Q.u.uCA, 0.012);
+    gl.uniform3f(Q.u.uCtx, (cw2 + C.ox * (1 - sC) + hxw * sC) * s, (ch2 + C.oy * (1 - sC) + hyw * sC) * s, R * sC * s);
+    gl.uniform1f(Q.u.uCAsp, this.head.rx / this.head.ry);
+    gl.uniform3f(Q.u.uFloor, (cw2 + C.ox * (1 - sF) + hxw * sF) * s, (ch2 + C.oy * (1 - sF) + hyw * sF) * s, R * 1.6 * sF * s);
+    gl.uniform3fv(Q.u.uSC, this.siteCol);
+    const lock = this.live && this.lockBpm > 0;
+    gl.uniform2f(Q.u.uScan, lock ? this.beatPhase : 0, lock ? this.beatConf * 0.8 : 0);
+    gl.uniform1f(Q.u.uWake, this.wake);
+    gl.uniform1f(Q.u.uPr, s);
     this._draw(null);
+
+    // ---- suspended motes (additive points) ----
+    if (this.wake > 0 && this.moteN > 0) {
+      Q = P.motes; gl.useProgram(Q.p);
+      this._tex(Q, 'uPos', this.motes.read, 0); this._tex(Q, 'uDye', this.dye.read, 1);
+      gl.uniform1i(Q.u.uW, MOTE_W);
+      gl.uniform2f(Q.u.uCss, this.cssW, this.cssH);
+      gl.uniform3f(Q.u.uCam, C.ox, C.oy, C.Dk);
+      gl.uniform1f(Q.u.uDepth, R * 1.6);
+      gl.uniform1f(Q.u.uPr, s); gl.uniform1f(Q.u.uWake, this.wake);
+      gl.bindVertexArray(this.emptyVao);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+      gl.drawArrays(gl.POINTS, 0, this.moteN);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(this.vao);
+    }
   }
 
   _save() {
-    this._show(true);   // snapshot = fluid only (no head outline; arms live on their own canvas)
+    this._composite(true);   // snapshot = fluid + cortex + motes (no head outline; arms live on their own canvas)
     const a = document.createElement('a');
     a.download = `hbi-ink-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
     a.href = this.canvas.toDataURL('image/png'); a.click();
-    this._show();
+    this._composite();
   }
 
   /** frames running slow (>22ms avg for ~2s): drop pressure iterations, then pixel ratio, then dye res */
@@ -509,6 +753,7 @@ export class InkView {
     if (this.slow < 2) return;
     this.slow = 0; this.ftAvg = 16;
     if (this.iters > 12) this.iters = 12;
+    else if (this.moteN > MOTE_W * MOTE_H / 2) this.moteN = (MOTE_W * MOTE_H) / 2;
     else if (this.pr > 0.75) { this.pr = Math.max(0.75, this.pr - 0.25); this.resize(); }
     else if ((this.dyeRes || DYE_RES) > 256) { this.dyeRes = 256; this.resize(); }
   }

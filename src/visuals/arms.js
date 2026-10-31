@@ -13,7 +13,9 @@ import * as THREE from 'three';
 //   Artifact hold on a sensor (st.held[i]) → that arm glitches (RGB-split ghosts, vertex jitter,
 //   scanline flicker, stuttering light); st.motion → every arm glitches. The art is never glitched.
 // World units = CSS pixels; a perspective camera is placed so the z=0 plane maps 1:1 to the screen,
-// so needle tips (z=0) align exactly with the fluid's site coordinates.
+// so needle tips (z=0) align exactly with the fluid's site coordinates. The camera is a "window" rig shared
+// with ink.js: it may slide (head tilt) and dolly (real beats only), always with an off-axis frustum that keeps
+// the z=0 rectangle pinned to the viewport — off-plane parts parallax, the tips never leave their sites.
 
 const FOV = 30;
 const C_OFF = new THREE.Color(0x07080a), C_RED = new THREE.Color(0xff2244), C_AMB = new THREE.Color(0xffb000);
@@ -186,8 +188,19 @@ export class Arms {
     }
   }
 
-  frame(st, dt, dose, active) {
+  /** off-axis window projection: eye at (ox, oy, D) looking down -z, z=0 plane mapped exactly onto the viewport */
+  _rig(cam) {
+    const c = this.cam, w = this.w, h = this.h;
+    const ox = cam ? cam.ox : 0, oy = cam ? cam.oy : 0, D = cam ? cam.Dk : (h / 2) / Math.tan((FOV / 2) * Math.PI / 180);
+    const n = D * 0.1, k = n / D;
+    c.position.set(ox, oy, D); c.quaternion.identity(); c.near = n; c.far = D * 4;
+    c.projectionMatrix.makePerspective((-w / 2 - ox) * k, (w / 2 - ox) * k, (h / 2 - oy) * k, (-h / 2 - oy) * k, n, D * 4);
+    c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
+  }
+
+  frame(st, dt, dose, active, cam) {
     if (!this.sites) return;
+    this._rig(cam);
     this.t += dt;
     const t = this.t, live = st.ready === 'live', R = this.head.ry, v = this.v;
     this.wake += ((live ? 1 : 0) - this.wake) * Math.min(1, dt * 1.6);

@@ -10,8 +10,11 @@ b{color:var(--mg);letter-spacing:.15em;text-shadow:0 0 6px var(--mg)}
 .dim{opacity:.6}.small{font-size:11px}
 
 /* ---------- bottom-centre dock ---------- */
-#hud{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:3;
-  width:min(980px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow-y:auto;overflow-x:hidden;
+/* #dockwrap stacks the replay bar directly above the (variable-height) dock */
+#dockwrap{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:3;
+  width:min(980px,calc(100vw - 32px));max-height:calc(100vh - 32px);display:flex;flex-direction:column;gap:6px;pointer-events:none}
+#dockwrap>*{pointer-events:auto}
+#hud{position:relative;width:100%;min-height:0;flex:0 1 auto;overflow-y:auto;overflow-x:hidden;
   padding:10px 14px 8px;background:
     repeating-linear-gradient(0deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px),
     linear-gradient(180deg,rgba(10,6,24,.82),var(--panel));
@@ -76,6 +79,12 @@ b{color:var(--mg);letter-spacing:.15em;text-shadow:0 0 6px var(--mg)}
 button{background:rgba(0,255,240,.03);color:var(--cy);border:1px solid rgba(0,255,240,.6);padding:4px 9px;font:inherit;cursor:pointer;letter-spacing:.03em;transition:background .15s,color .15s,box-shadow .15s}
 button:hover,button:focus-visible{background:var(--cy);color:var(--bg);box-shadow:0 0 12px rgba(0,255,240,.5);outline:none}
 button:disabled{opacity:.4;cursor:wait}
+select{background:rgba(0,255,240,.03);color:var(--cy);border:1px solid rgba(0,255,240,.6);padding:3px 6px;font:inherit;cursor:pointer;max-width:220px}
+select:hover,select:focus-visible{box-shadow:0 0 12px rgba(0,255,240,.4);outline:none}
+select option{background:#05060d;color:#eaffff}
+.sel{display:inline-flex}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+#sessbtns{border-top:0;padding-top:4px;align-items:center}
 button.done,#calib.done{border-color:var(--gn);color:var(--gn)}
 button.done:hover{background:var(--gn);color:var(--bg)}
 .dock-foot{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:4px 14px;padding-top:6px;min-height:1.4em;text-align:center}
@@ -127,4 +136,53 @@ button.done:hover{background:var(--gn);color:var(--bg)}
   .mnote{display:none}
   #lab{left:16px;right:16px;max-height:44vh}
   #lab canvas{width:min(440px,calc(100vw - 54px),calc((44vh - 70px) * 1.222))!important}
+}
+
+/* ---------- replay bar: just above the dock ---------- */
+#replaybar{display:flex;align-items:center;gap:10px;padding:6px 12px;
+  background:linear-gradient(180deg,rgba(14,6,30,.86),rgba(4,5,12,.86));border:1px solid rgba(138,77,255,.6);
+  box-shadow:0 0 18px rgba(138,77,255,.25),0 0 0 1px rgba(0,255,240,.15) inset;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+#replaylabel{color:#eaffff;letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+.reptrack{position:relative;flex:1;height:10px;min-width:80px;background:rgba(255,255,255,.05);border:1px solid rgba(0,255,240,.25)}
+#replayfill{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(0,255,240,.35),var(--cy));box-shadow:0 0 10px var(--cy);transition:width .2s linear}
+#replaymarks{position:absolute;inset:-3px 0}
+#replaymarks i{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--cy);box-shadow:0 0 6px var(--cy)}
+#replaymarks i.open{background:var(--cy);box-shadow:0 0 6px var(--cy)}
+#replaymarks i.closed{background:var(--vi);box-shadow:0 0 6px var(--vi)}
+
+/* ---------- guided-session banner: top-centre, compact, the art stays visible ---------- */
+#sessov{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  width:min(440px,calc(100vw - 32px));padding:10px 14px 12px;text-align:center;
+  background:linear-gradient(180deg,rgba(10,6,24,.80),rgba(4,5,12,.72));border:1px solid rgba(0,255,240,.5);
+  box-shadow:0 0 22px rgba(0,255,240,.18),0 0 0 1px rgba(255,43,214,.2) inset;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));
+  transition:opacity .8s ease,background .8s ease,border-color .8s ease}
+.sesshead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+#sessphase{font-size:11px;letter-spacing:.22em;text-transform:uppercase;font-variant:small-caps;color:#eaffff;
+  text-shadow:-1px 0 rgba(255,43,214,.7),1px 0 rgba(0,255,240,.7)}
+#sessend{padding:2px 8px;font-size:11px}
+#sesscount{display:block;font-size:52px;line-height:1.05;margin:4px 0 0;color:var(--cy);letter-spacing:.04em;
+  text-shadow:-2px 0 rgba(255,43,214,.8),2px 0 rgba(0,255,240,.8),0 0 18px rgba(0,255,240,.6)}
+#sesscount:empty{display:none}
+#sesstxt{margin:6px 0 8px;color:#d8fbff;line-height:1.45}
+.sessbar{height:3px;background:rgba(255,255,255,.07);overflow:hidden}
+#sessfill{display:block;height:100%;width:0;background:var(--cy);box-shadow:0 0 8px var(--cy);transition:width .4s linear}
+/* eyes-closed phase: dim, low contrast, minimal — nothing to look at */
+#sessov.closed{opacity:.32;background:rgba(3,3,8,.35);border-color:rgba(0,255,240,.12);box-shadow:none}
+#sessov.closed #sessphase,#sessov.closed #sesstxt{text-shadow:none;color:rgba(234,255,255,.7)}
+#sessov.closed #sessfill{background:rgba(138,77,255,.6);box-shadow:none}
+#sessov.closed #sessend{border-color:rgba(0,255,240,.25);color:rgba(0,255,240,.6)}
+/* countdown: big number pulses once per second */
+#sessov.count #sesscount{animation:spulse 1s ease-out infinite}
+@keyframes spulse{0%{transform:scale(1.18);opacity:1}100%{transform:scale(1);opacity:.85}}
+@media (prefers-reduced-motion:reduce){#sessov.count #sesscount{animation:none}}
+
+@media (max-width:520px){
+  #replaybar{flex-wrap:wrap;gap:6px}
+  #replaylabel{max-width:100%;flex-basis:100%}
+  #sessov{top:10px;padding:8px 10px 10px}
+  #sesscount{font-size:40px}
+  #sessphase{letter-spacing:.14em}
+  select{max-width:150px}
 }
