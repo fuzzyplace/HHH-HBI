@@ -1,5 +1,5 @@
-import { BandAnalyzer, Normalizer, BAND_NAMES } from './dsp/bands.js';
-import { HeartRate } from './dsp/ppg.js';
+import { BAND_NAMES } from './dsp/bands.js';
+import { SignalPipeline } from './dsp/pipeline.js';
 import { SimulatedSource } from './input/simulated.js';
 import { GpuScene } from './visuals/gpu.js';
 import { Scene } from './visuals/scene.js';
@@ -12,9 +12,11 @@ catch (e) { console.warn('GPU scene failed, 2D fallback', e); scene = new Scene(
 window.hbi = scene;
 const flashFn = () => scene.flash || 0;
 const synth = new Synth();
-const analyzer = new BandAnalyzer(4);
-let norm = new Normalizer();
-let chNorm = Array.from({ length: 4 }, () => new Normalizer());
+const pipe = new SignalPipeline();
+const CAL_KEY = 'hbi.calibration.v1';   // local-only baseline (band stats + timestamp, no device IDs)
+try { const j = JSON.parse(localStorage.getItem(CAL_KEY) || 'null'); if (j && !pipe.importCalibration(j)) localStorage.removeItem(CAL_KEY); } catch {}
+let sig = null;   // latest pipeline result
+let calWas = pipe.calibrated ? 'done' : 'none';   // calibration UI state: none | running | done
 const rate = { eeg: 0, ppg: 0, imu: 0 };   // samples/sec counters for stream health
 const CH = ['TP9', 'AF7', 'AF8', 'TP10'];
 const COLORS = { delta: '#8a4dff', theta: '#ff2bd6', alpha: '#00fff0', beta: '#ffb000', gamma: '#ffffff' };
@@ -24,8 +26,6 @@ const state = {
   ch: Array.from({ length: 4 }, () => Object.fromEntries(BAND_NAMES.map(k => [k, 0]))),
   asym: 0, bpm: 0, tilt: { x: 0, y: 0 }, gyro: { x: 0, y: 0, z: 0 }, battery: null,
 };
-const hr = new HeartRate(() => { scene.onBeat(); synth.beat(); });
-let lastBlink = 0, p2pBase = 60;
 
 // HUD bars
 $('bars').innerHTML = BAND_NAMES.map(k => `<div class="bar"><span>${k}</span><i id="b-${k}" style="color:${COLORS[k]};background:${COLORS[k]};width:0"></i></div>`).join('');
@@ -36,10 +36,10 @@ const setStatus = label => ($('status').textContent = label + (scene?.webgpu ? '
 // handlers ignore events from any source that isn't the live one (e.g. a Muse still connecting while SIM runs)
 function wire(src) {
   const live = fn => d => { if (source === src) fn(d); };
-  src.on('eeg', live(({ ch, samples }) => { analyzer.push(ch, samples); if (ch === 0) rate.eeg += samples.length; }));
-  src.on('ppg', live(({ ch, samples }) => { if (ch === 0) { hr.push(samples); rate.ppg += samples.length; } }));
-  src.on('accel', live(a => { rate.imu++; state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
-  src.on('gyro', live(g => { state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
+  src.on('eeg', live(({ ch, samples }) => { pipe.push(ch, samples); if (ch === 0) rate.eeg += samples.length; }));
+  src.on('ppg', live(({ ch, samples }) => { if (ch === 0) { pipe.pushPpg(samples); rate.ppg += samples.length; } }));
+  src.on('accel', live(a => { rate.imu++; pipe.pushMotion('accel', a); state.tilt.x += (Math.max(-1, Math.min(1, a.x)) - state.tilt.x) * 0.1; state.tilt.y += (Math.max(-1, Math.min(1, a.y)) - state.tilt.y) * 0.1; }));
+  src.on('gyro', live(g => { pipe.pushMotion('gyro', g); state.gyro.x = g.x; state.gyro.y = g.y; state.gyro.z = g.z; }));
   src.on('battery', live(p => { state.battery = p; $('batt').textContent = `🔋 ${Math.round(p)}%`; }));
   src.on('reconnecting', live(({ attempt, max }) => { msg(`Muse signal lost — reconnecting (${attempt}/${max})`); setStatus('MUSE 2 · RECONNECTING'); }));
   src.on('reconnected', live(() => { msg('Muse 2 reconnected'); setStatus('MUSE 2'); }));
@@ -50,7 +50,8 @@ function swapTo(src, label) {
   const prev = source;
   source = src;
   prev?.stop();
-  norm = new Normalizer(); chNorm = Array.from({ length: 4 }, () => new Normalizer());   // re-learn ranges per source
+  pipe.reset();   // re-learn adaptive ranges per source; calibration is kept, a running one is stopped
+  if (calWas === 'running') settleCalibration(`Calibration stopped — switched to ${label}`);
   state.battery = null; $('batt').textContent = '🔋 --';
   setStatus(label);
 }
@@ -82,34 +83,63 @@ $('mode').onclick = toggleMode;
 $('clear').onclick = () => scene.clear();
 $('hide').onclick = () => $('hud').classList.toggle('hidden');
 $('simbtns').onclick = e => e.target.dataset.m && window.sim?.setMode?.(e.target.dataset.m);
-addEventListener('keydown', e => { if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); });
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'h') $('hud').classList.toggle('hidden'); if (e.key === 's') snap(); if (e.key === 'g') toggleMode(); });
 
-// DSP @10Hz
+// DSP @10Hz — all signal math lives in src/dsp; main only consumes the result
 setInterval(() => {
-  const { channels, avg } = analyzer.compute();
-  const n = norm.apply(avg);
-  for (const k of BAND_NAMES) state.bands[k] += (n[k] - state.bands[k]) * 0.3;
-  channels.forEach((c, i) => { const v = chNorm[i].apply(c); for (const k of BAND_NAMES) state.ch[i][k] += (v[k] - state.ch[i][k]) * 0.3; });
-  const L = (channels[0].alpha + channels[1].alpha) / 2, R = (channels[2].alpha + channels[3].alpha) / 2;
-  state.asym += ((R - L) / Math.max(1e-6, R + L) - state.asym) * 0.2;
-  state.bpm = hr.bpm;
-  $('bpm').textContent = `♥ ${hr.bpm ? Math.round(hr.bpm) : '--'}`;
+  const r = (sig = pipe.tick(performance.now()));
+  for (const k of BAND_NAMES) { state.bands[k] = r.bands[k]; for (let i = 0; i < 4; i++) state.ch[i][k] = r.ch[i][k]; }
+  state.asym = r.asym; state.bpm = r.bpm;
+  $('bpm').textContent = `♥ ${r.bpm ? Math.round(r.bpm) : '--'}`;
   for (const k of BAND_NAMES) $('b-' + k).style.width = `${Math.round(state.bands[k] * 200)}px`;
-  // blink / clench: frontal channel spike
-  const now = performance.now();
-  // adaptive: spike must be 1.6x the running frontal p2p baseline
-  const p2p = Math.max(analyzer.p2pSince(1), analyzer.p2pSince(2));
-  if (now - lastBlink > 800 && p2p > Math.max(150, p2pBase * 1.6)) { lastBlink = now; scene.onBlink(); synth.blink(); }
-  p2pBase += (Math.min(p2p, p2pBase * 2) - p2pBase) * 0.02;
+  for (const e of r.events) {
+    if (e === 'beat') { scene.onBeat(); synth.beat(); }
+    else if (e === 'blink' || e === 'clench') { scene.onBlink(); synth.blink(); }   // mapping: blink/clench → flash + glitch, noise burst
+  }
+  updateCalibration(r.calibration);
 }, 100);
 
-// Signal quality + stream health @1Hz. Contact via per-channel std (µV): ~3–60 good, >60 noisy, <1.5 flat/no contact.
+// Calibration: 30s eyes-closed rest baseline; only artifact-free windows count
+function showCalibrated() { $('calib').classList.toggle('done', pipe.calibrated); $('calib').textContent = pipe.calibrated ? 'Recalibrate (C)' : 'Calibrate (C)'; }
+function updateCalibration(c) {
+  if (c.state === 'running') $('calfill').style.width = `${Math.round(c.progress * 100)}%`;
+  if (c.state === calWas) return;
+  if (calWas === 'running' && c.state === 'done') {
+    try { localStorage.setItem(CAL_KEY, JSON.stringify(pipe.exportCalibration())); } catch {}
+    msg('Baseline saved — visuals now track your own range');
+  }
+  $('calov').hidden = c.state !== 'running';
+  calWas = c.state; showCalibrated();
+}
+function startCalibration() {
+  if (calWas === 'running') return;
+  $('calfill').style.width = '0%'; pipe.startCalibration(30);
+  if (source === window.sim) msg('Calibrating on SIM — connect the Muse for a real baseline');
+}
+// settle UI state here so the next tick doesn't read a cancelled run as "finished"
+function settleCalibration(text) {
+  calWas = pipe.calibrated ? 'done' : 'none';
+  $('calov').hidden = true; showCalibrated();
+  msg(text + (pipe.calibrated ? ' — keeping previous baseline' : ''));
+}
+function cancelCalibration() {
+  if (calWas !== 'running') return;
+  pipe.cancelCalibration();
+  settleCalibration('Calibration cancelled');
+}
+$('calib').onclick = startCalibration;
+$('calcancel').onclick = cancelCalibration;
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey || e.altKey) return; if (e.key === 'c') startCalibration(); if (e.key === 'Escape') cancelCalibration(); });
+showCalibrated();
+
+// Signal quality + stream health @1Hz (scores computed in src/dsp)
+const QC = { good: '#00ff9c', noisy: '#ffb000', 'no contact': '#ff3355', railed: '#ff3355' };
 setInterval(() => {
+  if (!sig) return;
   $('sq').innerHTML = CH.map((n, i) => {
-    const s = analyzer.std(i);
-    const [c, t] = !Number.isFinite(s) || s < 1.5 ? ['#ff3355', 'no contact'] : s > 60 ? ['#ffb000', 'noisy'] : ['#00ff9c', 'good'];
-    return `<span title="${n}: ${t} (σ ${s.toFixed(1)}µV)" style="color:${c}">● ${n}</span>`;
-  }).join(' ') + `<br><span class="dim">EEG ${rate.eeg}Hz · PPG ${rate.ppg}Hz · IMU ${rate.imu}/s</span>`;
+    const q = sig.quality[i];
+    return `<span title="${n}: ${q.label} (σ ${q.std.toFixed(1)}µV, score ${q.score.toFixed(2)})" style="color:${QC[q.label] || '#fff'}">● ${n}</span>`;
+  }).join(' ') + `<br><span class="dim">EEG ${rate.eeg}Hz · PPG ${rate.ppg}Hz · IMU ${rate.imu}/s${sig.artifact.rejected ? ' · artifact hold' : ''}</span>`;
   rate.eeg = rate.ppg = rate.imu = 0;
 }, 1000);
 

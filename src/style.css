@@ -19,3 +19,9 @@ button:hover{background:var(--cy);color:var(--bg)}
 .glitch::after{color:var(--am);animation:gl 1.7s infinite reverse steps(1);clip-path:inset(55% 0 0 0)}
 @keyframes gl{0%,92%{transform:none}93%{transform:translate(-3px,1px)}95%{transform:translate(3px,-1px)}97%{transform:translate(-1px,0)}}
 #sq{display:block;line-height:1.6}#sq span{margin-right:6px}.dim{opacity:.6}
+#calov{position:fixed;inset:0;display:grid;place-items:center;background:rgba(5,0,15,.72);backdrop-filter:blur(3px);z-index:5}
+#calov[hidden]{display:none}
+.calbox{max-width:340px;padding:18px 20px;border:1px solid var(--mg);background:rgba(5,0,15,.85);text-align:center;box-shadow:0 0 24px rgba(255,43,214,.35)}
+.calbox p{margin:10px 0;line-height:1.5}
+.calbar{height:6px;border:1px solid var(--cy);margin:12px 0}.calbar i{display:block;height:100%;width:0;background:var(--cy);box-shadow:0 0 8px var(--cy);transition:width .2s}
+#calib.done{border-color:#00ff9c;color:#00ff9c}
