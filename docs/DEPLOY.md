@@ -42,8 +42,8 @@ Guard: each event ≤20 per page load, ≤150 total. Opt-out: GPC, Do Not Track,
 
 ## Dashboard (vercel.com → project)
 - Web Analytics and Speed Insights: enabled (verified via API on first deploy).
-- **Firewall**: enable Bot Protection (managed), keep DDoS mitigation on; Attack Challenge Mode if under attack.
+- **Firewall**: Bot Protection = Challenge (live since 2026-10-31; browsers and verified bots pass, scripts like plain `curl` get 429). DDoS mitigation on by default. Under attack: `vercel firewall attack-mode`. Check traffic: `vercel firewall overview`.
 - **Settings → Spend Management**: set a cap/alerts (bandwidth abuse on a static site).
-- **Settings → Git**: connect `fuzzyplace/HHH-HBI` → push to `main` deploys production, branches get preview URLs.
+- **Git**: install the Vercel GitHub App on `fuzzyplace` (github.com/apps/vercel), then `vercel git connect` → push to `main` deploys production, other branches get preview URLs.
 - **Deployment Protection**: keep Vercel Authentication on *preview* deployments only.
 - **Observability** tab: edge request counts, 4xx/5xx, top paths, bandwidth.
