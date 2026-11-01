@@ -45,8 +45,8 @@ export class SimulatedSource extends Emitter {
       const p = PRESETS[this.mode];
       for (const k in p) this.w[k] += (p[k] - this.w[k]) * 0.02;
     }
-    const blink = tt > this.nextBlink;
-    if (blink) this.nextBlink = tt + 2.5 + Math.random() * 5;
+    const blink = tt > this.nextBlink && this.mode !== 'calm';   // calm ≈ eyes closed: no blinks
+    if (tt > this.nextBlink) this.nextBlink = tt + 2.5 + Math.random() * 5;
     for (let ch = 0; ch < 4; ch++) {
       const out = new Float32Array(n), pk = this.pink[ch];
       for (let i = 0; i < n; i++) {

@@ -273,7 +273,8 @@ export class GpuScene {
     this.bloomNode.strength.value = 0.5 + F * 0.9 + this.beat * 1.2 + this.flash * 1.5;
 
     // head tilt AIMS where new paint is emitted (clear, screen-scale steer); gyro keeps subtle rotation
-    U.aim.value.set(st.tilt.x * 2.3, st.tilt.y * 2.3, st.tilt.x * 0.4);
+    const cm = st.camera?.on ? st.camera : null, cw = cm ? Math.min(1, cm.motion * 1.5) : 0;   // camera: where you move aims it too
+    U.aim.value.set(st.tilt.x * 2.3 + (cm ? cm.x * cw * 2.3 : 0), st.tilt.y * 2.3 + (cm ? cm.y * cw * 2.3 : 0), st.tilt.x * 0.4);
     this.group.rotation.y += dt * st.gyro.y * 0.002;
     this.group.rotation.x += (st.tilt.y * 0.4 - this.group.rotation.x) * 0.05;
     // beat dollies the camera forward through the accumulated paint, easing back between beats

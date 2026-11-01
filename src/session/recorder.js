@@ -1,11 +1,13 @@
 // Session recording + replay. Records the derived `state` stream (never raw samples, never device IDs)
 // at the DSP rate (20Hz) as packed Float32 frames, plus beat/blink events and phase changes.
 // Sessions live only in this browser (IndexedDB 'hbi' → 'sessions', newest 8 kept); Export is a user click.
+import { PHASES } from './guide.js';
 
 const BANDS = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
 const LABELS = ['off', 'good', 'noisy', 'no contact', 'railed'];
 const READY = ['idle', 'contact', 'uncalibrated', 'live'];
-export const PHASES = ['open', 'closed', 'open2'];
+const LEGACY = ['open', 'closed', 'open2'];   // sessions saved before the journey (eyes open / closed / open)
+const phasesOf = s => s.phases || LEGACY;
 // frame layout (floats)
 const O = { bands: 0, ch: 5, qs: 25, ql: 29, held: 33, motion: 37, relax: 38, focus: 39, bpm: 40, conf: 41, phase: 42, tilt: 43, gyro: 45, alphaDb: 48, ready: 49, sess: 50 };
 export const FW = 51;
@@ -41,7 +43,7 @@ export class Recorder {
     this.on = false;
     const s = {
       id: `s${this.t0}`, t: this.t0, n: this.n, fps: FPS, fw: FW, frames: this.frames.slice(0, this.n * FW),
-      events: this.events, marks: this.marks, ...this.meta,
+      events: this.events, marks: this.marks, phases: PHASES, ...this.meta,
     };
     s.summary = summarize(s);
     this.frames = null;
@@ -51,11 +53,11 @@ export class Recorder {
 
 /** per-phase means: relax, focus, alpha dB, band levels, heart rate */
 export function summarize(s) {
-  const out = {};
-  for (const ph of PHASES) out[ph] = { sec: 0, relax: 0, focus: 0, alphaDb: 0, bpm: 0, bpmN: 0, bands: Object.fromEntries(BANDS.map(b => [b, 0])) };
+  const out = {}, P = phasesOf(s);
+  for (const ph of P) out[ph] = { sec: 0, relax: 0, focus: 0, alphaDb: 0, bpm: 0, bpmN: 0, bands: Object.fromEntries(BANDS.map(b => [b, 0])) };
   const f = s.frames;
   for (let i = 0; i < s.n; i++) {
-    const o = i * s.fw, ph = out[PHASES[f[o + O.sess]]];
+    const o = i * s.fw, ph = out[P[f[o + O.sess]]];
     if (!ph || f[o + O.ready] !== 3) continue;   // only live seconds count
     ph.sec++; ph.relax += f[o + O.relax]; ph.focus += f[o + O.focus]; ph.alphaDb += f[o + O.alphaDb];
     if (f[o + O.bpm] > 0) { ph.bpm += f[o + O.bpm]; ph.bpmN++; }
@@ -72,7 +74,7 @@ export function summarize(s) {
 
 /** plays a session back into the shared state object; rate 1 = one frame per DSP tick, 0 = paused, <0 = rewind */
 export class Replayer {
-  constructor(s) { this.s = s; this.pos = 0; this.ev = 0; this.done = false; this.phase = 'open'; }
+  constructor(s) { this.s = s; this.P = phasesOf(s); this.pos = 0; this.ev = 0; this.done = false; this.phase = this.P[0]; }
   get i() { return Math.floor(this.pos); }
   get progress() { return this.s.n ? this.pos / this.s.n : 1; }
   /** fill st from the current frame, then advance by rate; returns events crossed going forward */
@@ -91,7 +93,7 @@ export class Replayer {
     st.tilt.x = f[o + O.tilt]; st.tilt.y = f[o + O.tilt + 1];
     st.gyro.x = f[o + O.gyro]; st.gyro.y = f[o + O.gyro + 1]; st.gyro.z = f[o + O.gyro + 2];
     st.ready = READY[f[o + O.ready]] || 'idle';
-    this.phase = PHASES[f[o + O.sess]];
+    this.phase = this.P[f[o + O.sess]];
     const next = Math.max(0, this.pos + rate);
     if (rate > 0) {   // fire the events this step passes over (scrubbing forward fast fires them all, in order)
       while (this.ev < s.events.length && s.events[this.ev][0] < Math.floor(next)) { if (s.events[this.ev][0] >= fi) out.push(s.events[this.ev][1]); this.ev++; }
@@ -138,7 +140,7 @@ export async function listSessions() {
   } catch { return mem.slice(); }
 }
 export function exportSession(s) {
-  const j = { ...s, frames: Array.from(s.frames, v => Math.round(v * 1000) / 1000), layout: O, labels: LABELS, phases: PHASES };
+  const j = { ...s, frames: Array.from(s.frames, v => Math.round(v * 1000) / 1000), layout: O, labels: LABELS, phases: phasesOf(s) };
   const a = document.createElement('a');
   a.download = `hbi-session-${new Date(s.t).toISOString().replace(/[:.]/g, '-')}.json`;
   a.href = URL.createObjectURL(new Blob([JSON.stringify(j)], { type: 'application/json' }));

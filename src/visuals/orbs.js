@@ -165,6 +165,8 @@ export class OrbsView {
     this.group.rotation.x += (tx - this.group.rotation.x) * Math.min(1, d * 3);
     this.group.rotation.z += (tz - this.group.rotation.z) * Math.min(1, d * 3);
     this.group.rotation.y += d * (st.gyro?.y ?? 0) * 0.002;   // real head motion only
+    const cm = st.camera;   // camera: a sideways sweep spins the orbit (only real movement, no idle spin)
+    if (cm?.on) this.group.rotation.y += d * Math.max(-3, Math.min(3, cm.vx)) * Math.min(1, cm.motion * 2) * 0.9;
 
     this.renderer.render(this.scene, this.cam);
     if (this.snapReq) { this.snapReq = false; save(this.canvas); }

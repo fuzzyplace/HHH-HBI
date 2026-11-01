@@ -691,6 +691,12 @@ export class InkView {
       }
       this.blink = 0;
     }
+    const cam = st.camera;
+    if (cam?.on && cam.motion > 0.04 && n < MAXS) {   // camera: your movement stirs the water where it happens (no dye)
+      const o = n * 4, k = Math.min(1, cam.motion * 1.5); n++;
+      sP[o] = 0.5 + cam.x * 0.42; sP[o + 1] = 0.5 + cam.y * 0.42; sP[o + 2] = (Rn * 0.18) ** 2;
+      sV[o] = Math.max(-3, Math.min(3, cam.vx)) * 160 * k * dt; sV[o + 1] = Math.max(-3, Math.min(3, cam.vy)) * 160 * k * dt;
+    }
     if (this.play || this.gold > 0.01) {
       this.nV = n; this.mD = m;
       if (this.play) this._play(st, dt);                       // stylus stir + artifact instruments (the user's real motion)

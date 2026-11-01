@@ -51,6 +51,11 @@ export class Synth {
       this.voices[band] = { g, og };
     }
     this.noiseBuf = this.noise(0.4);
+    // camera "air": soft looped noise through a band-pass; your movement opens it, height sets its colour (mono, no panner)
+    const air = ctx.createBufferSource(); air.buffer = this.noise(2); air.loop = true;
+    this.airF = ctx.createBiquadFilter(); this.airF.type = 'bandpass'; this.airF.Q.value = 1.2; this.airF.frequency.value = 800;
+    this.airG = ctx.createGain(); this.airG.gain.value = 0;
+    air.connect(this.airF).connect(this.airG).connect(this.bus); air.start();
     this.groove = new Groove(this);
     this.groove.onKick = d => this.onKick?.(d);
   }
@@ -85,6 +90,9 @@ export class Synth {
     const focus = clamp(s.focus == null ? 0.5 : s.focus);
     this.set(this.wet.gain, 0.12 + 0.28 * relax, 1);                      // relax → wetter (capped: dry stays dominant)
     for (const band of ['delta', 'theta']) this.set(V[band].og.gain, 0.2 + 0.25 * focus, 1);   // focus → brighter
+    const cam = s.camera, air = live && cam?.on ? Math.pow(clamp(cam.motion), 1.3) : 0;
+    this.set(this.airG.gain, 0.045 * air, air > 0 ? 0.15 : 0.6);                 // capped well under the chord
+    if (cam?.on) this.set(this.airF.frequency, 400 + 2200 * (clamp(cam.y, -1, 1) + 1) / 2, 0.3);   // move high → brighter air
     if (this.groove) this.groove.update(s, this.music === 'groove');
   }
   // one heartbeat pulse at time t0, scaled by amp. Three layers so it reads on BOTH

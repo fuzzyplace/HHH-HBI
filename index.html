@@ -2,6 +2,7 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HHH Human Brain Interface</title>
+<meta name="description" content="A few quiet minutes to settle your nervous system: your brainwaves and heartbeat paint living ink and play the sound.">
 <link rel="stylesheet" href="/src/style.css">
 </head><body>
 <canvas id="c" hidden></canvas>
@@ -9,51 +10,146 @@
 <canvas id="corbs" hidden></canvas>
 <canvas id="cink" hidden></canvas>
 <canvas id="carms" aria-hidden="true"></canvas>
-<div id="playhint" hidden role="status" aria-live="polite"></div>
 
-<div id="sessov" hidden role="status" aria-live="polite">
-  <div class="sesshead"><span id="sessphase">EYES OPEN · 1 OF 3</span><button id="sessend">End (Esc)</button></div>
-  <b id="sesscount"></b>
-  <p id="sesstxt"></p>
-  <div class="sessbar"><i id="sessfill"></i></div>
+<!-- always there: who you're connected to, your pulse, sound -->
+<header id="corner">
+  <b class="brand" aria-label="HHH Human Brain Interface">HHH<i>//</i>HBI</b>
+  <span id="status" class="chip" hidden></span>
+  <span id="bpm" class="chip" title="looking for a pulse" hidden>♥ --</span>
+  <span id="batt" class="chip" hidden></span>
+  <button id="mute" class="icon" title="Sound (M)" aria-label="Mute sound" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path class="on" d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="off" d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></svg>
+  </button>
+</header>
+
+<!-- ============ the guided journey: one card at a time ============ -->
+<main id="journey">
+  <section class="card" data-stage="welcome" aria-labelledby="w-h">
+    <p class="eyebrow">Human Brain Interface</p>
+    <h1 id="w-h">Come back to yourself</h1>
+    <p class="lede">A few quiet minutes to settle your nervous system. Your brainwaves and heartbeat paint living ink and play the sound around you. All you do is notice, breathe and rest.</p>
+    <div class="field">
+      <span class="lbl" id="len-l">How long</span>
+      <div class="seg" id="lengths" role="radiogroup" aria-labelledby="len-l">
+        <button data-min="3" role="radio">3 min</button><button data-min="5" role="radio">5 min</button><button data-min="10" role="radio">10 min</button>
+      </div>
+    </div>
+    <div class="acts">
+      <button class="primary big" data-act="muse">Begin with Muse 2</button>
+      <button class="link" data-act="sim">No headband? Try a simulated journey</button>
+    </div>
+    <p class="fine">Headphones help. Art and meditation, not a medical device. Your brain and heart signals never leave this device.</p>
+    <button class="link small" data-act="explore" id="skip" hidden>Skip to free play</button>
+  </section>
+
+  <section class="card" data-stage="connect" aria-labelledby="c-h">
+    <p class="eyebrow">Step 1 of 3 · Put it on</p>
+    <h2 id="c-h">Wear your Muse 2</h2>
+    <ol class="steps">
+      <li>Switch it on. The light starts to pulse.</li>
+      <li>Rest the band on your forehead and tuck the ear pieces behind your ears, touching skin. Move hair aside.</li>
+      <li>Press Connect, then choose your Muse in the list your browser shows.</li>
+    </ol>
+    <p class="warn" id="conn-err" role="alert" hidden></p>
+    <div class="acts">
+      <button class="primary big" data-act="connect" id="connect">Connect</button>
+      <button class="link" data-act="sim">Use the simulator instead</button>
+    </div>
+    <button class="link small back" data-act="welcome">Back</button>
+  </section>
+
+  <section class="card" data-stage="fit" aria-labelledby="f-h">
+    <p class="eyebrow" id="fit-eye">Step 2 of 3 · Settle in</p>
+    <h2 id="f-h">Let the sensors find you</h2>
+    <svg class="sensormap big" viewBox="0 0 100 100" role="img" aria-label="Sensor contact map, top view, nose up">
+      <path class="hm-nose" d="M44 12 L50 3 L56 12"/><ellipse class="hm-ear" cx="11" cy="56" rx="4" ry="9"/><ellipse class="hm-ear" cx="89" cy="56" rx="4" ry="9"/>
+      <ellipse class="hm-head" cx="50" cy="52" rx="38" ry="42"/><circle class="hm-ppg" cx="50" cy="13.5" r="2.4"/>
+      <circle data-s="AF7" class="q-off" cx="30" cy="20" r="5.5"/><circle data-s="AF8" class="q-off" cx="70" cy="20" r="5.5"/>
+      <circle data-s="TP9" class="q-off" cx="13" cy="62" r="5.5"/><circle data-s="TP10" class="q-off" cx="87" cy="62" r="5.5"/>
+      <text x="30" y="34" text-anchor="middle">AF7</text><text x="70" y="34" text-anchor="middle">AF8</text><text x="17" y="80" text-anchor="middle">TP9</text><text x="83" y="80" text-anchor="middle">TP10</text>
+    </svg>
+    <p class="status" id="fit-n" role="status">Waiting for the headset signal…</p>
+    <p class="lede small">Sit comfortably. Adjust the band until at least three dots glow green. If the ear dots stay red, dampen the skin behind your ears.</p>
+    <button class="link small back" data-act="welcome">Back</button>
+  </section>
+
+  <section class="card" data-stage="baseline" aria-labelledby="b-h">
+    <p class="eyebrow">Step 3 of 3 · Your baseline</p>
+    <div id="b-intro">
+      <h2 id="b-h">Meet your resting rhythm</h2>
+      <p class="lede">About half a minute: first with eyes open, then with eyes closed. Your brain's alpha rhythm rises when your eyes close, so measuring both tunes everything to you. One tone means close your eyes; two tones mean open them.</p>
+      <div class="acts">
+        <button class="primary big" data-act="calibrate">Start</button>
+        <button class="link" data-act="reuse" id="reuse" hidden>Use my saved baseline</button>
+      </div>
+    </div>
+    <div id="b-run" hidden>
+      <h2 id="calstep">Eyes open</h2>
+      <p class="lede" id="caltxt">Look softly at one point on the screen. Stay still, jaw relaxed.</p>
+      <div class="bar"><i id="calfill"></i></div>
+      <p class="status" id="calleft"></p>
+      <button class="link small" data-act="cancelcal">Cancel</button>
+    </div>
+    <button class="link small back" data-act="back" id="b-back">Back</button>
+  </section>
+
+  <section class="card" data-stage="ready" aria-labelledby="r-h">
+    <p class="eyebrow">Connected</p>
+    <h2 id="r-h">This is you</h2>
+    <p class="lede">Each sensor feeds ink from where it sits on your head. Your heartbeat moves the water. The chord follows your brainwaves.</p>
+    <p class="warn" id="r-note" hidden></p>
+    <div class="acts">
+      <button class="primary big" data-act="practice" id="r-go">Begin the practice</button>
+      <button class="link" data-act="calibrate">Measure my baseline again</button>
+      <button class="link" data-act="explore">Explore freely</button>
+    </div>
+  </section>
+
+  <section class="card" data-stage="reflect" aria-labelledby="x-h">
+    <p class="eyebrow">Welcome back</p>
+    <h2 id="x-h">What changed</h2>
+    <dl class="stats" id="stats"></dl>
+    <p class="fine">A mirror, not a score. Bodies vary day to day.</p>
+    <div class="acts">
+      <button class="primary big" data-act="explore">Explore freely</button>
+      <button class="link" data-act="again">Go again</button>
+      <button class="link" data-act="watch" id="watch">Watch it back</button>
+    </div>
+  </section>
+</main>
+
+<!-- ============ the practice: a quiet caption, low on the screen ============ -->
+<div id="practice" hidden role="status" aria-live="polite">
+  <p class="eyebrow"><span id="p-step">1 of 4</span> · <span id="p-name">Arrive</span></p>
+  <b id="p-count"></b>
+  <p id="p-txt"></p>
+  <p id="p-breath" hidden><span id="p-word">breathe in</span><span id="p-sync"></span></p>
+  <p id="p-hint" class="status"></p>
+  <div class="bar thin"><i id="p-fill"></i></div>
+  <button class="link small" data-act="endpractice">End early</button>
 </div>
 
-<div id="dockwrap">
+<!-- ============ free play ============ -->
+<div id="dockwrap" hidden>
 <div id="replaybar" hidden role="region" aria-label="Session playback">
   <span id="replaylabel">Playback</span>
   <div class="reptrack"><i id="replayfill"></i><span id="replaymarks"></span></div>
   <button id="replaystop">Stop (Esc)</button>
 </div>
-<div id="hud" class="dock" role="region" aria-label="Controls and key">
+<div id="hud" class="dock" role="region" aria-label="Free play controls">
   <header class="bar">
-    <b class="brand" aria-label="HHH Human Brain Interface">HHH<i>//</i>HBI</b>
-    <span id="status" class="chip">SIM</span>
-    <span id="bpm" class="chip" title="looking for a pulse">♥ --</span>
-    <span id="batt" class="chip" hidden></span>
-    <span id="step" class="step" role="status">Connect a Muse 2 headband</span>
-    <span class="cta">
-      <button id="alt" class="link" hidden></button>
-      <button id="next" class="primary">Connect Muse</button>
-    </span>
+    <span id="step" class="step" role="status">Live</span>
+    <button id="again" class="primary">Guided practice</button>
   </header>
 
   <section class="readout">
-    <svg id="sensormap" viewBox="0 0 100 100" role="img" aria-label="Sensor contact map, top view, nose up">
-      <path class="hm-nose" d="M44 12 L50 3 L56 12"/>
-      <ellipse class="hm-ear" cx="11" cy="56" rx="4" ry="9"/>
-      <ellipse class="hm-ear" cx="89" cy="56" rx="4" ry="9"/>
-      <ellipse class="hm-head" cx="50" cy="52" rx="38" ry="42"/>
-      <circle id="s-PPG" class="hm-ppg" cx="50" cy="13.5" r="2.4"/>
-      <circle id="s-AF7" class="q-off" cx="30" cy="20" r="5.5"/>
-      <circle id="s-AF8" class="q-off" cx="70" cy="20" r="5.5"/>
-      <circle id="s-TP9" class="q-off" cx="13" cy="62" r="5.5"/>
-      <circle id="s-TP10" class="q-off" cx="87" cy="62" r="5.5"/>
-      <text x="30" y="34" text-anchor="middle">AF7</text>
-      <text x="70" y="34" text-anchor="middle">AF8</text>
-      <text x="17" y="80" text-anchor="middle">TP9</text>
-      <text x="83" y="80" text-anchor="middle">TP10</text>
+    <svg class="sensormap" viewBox="0 0 100 100" role="img" aria-label="Sensor contact map, top view, nose up">
+      <path class="hm-nose" d="M44 12 L50 3 L56 12"/><ellipse class="hm-ear" cx="11" cy="56" rx="4" ry="9"/><ellipse class="hm-ear" cx="89" cy="56" rx="4" ry="9"/>
+      <ellipse class="hm-head" cx="50" cy="52" rx="38" ry="42"/><circle class="hm-ppg" cx="50" cy="13.5" r="2.4"/>
+      <circle data-s="AF7" class="q-off" cx="30" cy="20" r="5.5"/><circle data-s="AF8" class="q-off" cx="70" cy="20" r="5.5"/>
+      <circle data-s="TP9" class="q-off" cx="13" cy="62" r="5.5"/><circle data-s="TP10" class="q-off" cx="87" cy="62" r="5.5"/>
+      <text x="30" y="34" text-anchor="middle">AF7</text><text x="70" y="34" text-anchor="middle">AF8</text><text x="17" y="80" text-anchor="middle">TP9</text><text x="83" y="80" text-anchor="middle">TP10</text>
     </svg>
-
     <div id="key" aria-label="Band key">
       <div class="krow" data-band="delta" title="delta 1–4 Hz · deep rest, slow rhythm"><i class="sw"></i><span class="kn">delta</span><span class="kh">1–4</span><span class="kt"><i id="kb-delta"></i></span></div>
       <div class="krow" data-band="theta" title="theta 4–8 Hz · drowsy, dreamy, drifting"><i class="sw"></i><span class="kn">theta</span><span class="kh">4–8</span><span class="kt"><i id="kb-theta"></i></span></div>
@@ -61,7 +157,6 @@
       <div class="krow" data-band="beta" title="beta 13–30 Hz · alert, active attention"><i class="sw"></i><span class="kn">beta</span><span class="kh">13–30</span><span class="kt"><i id="kb-beta"></i></span></div>
       <div class="krow" data-band="gamma" title="gamma 30–44 Hz · fast activity; on the Muse often muscle"><i class="sw"></i><span class="kn">gamma</span><span class="kh">30–44</span><span class="kt"><i id="kb-gamma"></i></span></div>
     </div>
-
     <div id="meters">
       <div class="meter" title="relax: your calm level against your calibrated range"><span>Relax</span><span class="mt"><i id="m-relax"></i></span><b id="v-relax">--</b></div>
       <div class="meter" title="focus: your activation level against your calibrated range"><span>Focus</span><span class="mt"><i id="m-focus"></i></span><b id="v-focus">--</b></div>
@@ -82,8 +177,8 @@
       <button id="musicbtn" title="Groove: heart-locked tech house instead of the band chord (N)" aria-pressed="false">Groove</button>
     </div>
     <div class="grp icons" role="group" aria-label="Utilities">
-      <button id="mute" class="icon" title="Sound (M)" aria-label="Mute sound" aria-pressed="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="on" d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/><path class="off" d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></svg>
+      <button id="cambtn" class="icon" title="Camera: your movement stirs the water and the sound (K)" aria-label="Use camera" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5"/></svg>
       </button>
       <button id="snap" class="icon" title="Snapshot (S)" aria-label="Save a snapshot">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
@@ -97,20 +192,16 @@
   <div id="more" hidden>
     <div class="row" role="group" aria-label="Device">
       <span class="lbl">Device</span>
-      <button id="connect">Connect Muse</button>
-      <button id="calib" title="Calibrate (C)">Calibrate</button>
+      <button id="dconnect">Connect Muse</button>
+      <button id="calib" title="Measure your baseline again (C)">Recalibrate</button>
       <span id="simbtns" class="grp" role="group" aria-label="Simulator mode"><button data-m="auto">Auto</button><button data-m="calm">Calm</button><button data-m="focus">Focus</button><button data-m="drift">Drift</button></span>
     </div>
-    <div class="row" id="sessbtns" role="group" aria-label="Session">
-      <span class="lbl">Session</span>
-      <label class="sel"><span class="vh">Eyes-closed length</span><select id="medlen" title="eyes-closed length">
-        <option value="1">1 min</option><option value="3" selected>3 min</option><option value="5">5 min</option><option value="10">10 min</option>
-      </select></label>
-      <button id="session" title="Guided session, recorded (R)">Begin session</button>
-      <label class="sel"><span class="vh">Recorded sessions</span><select id="sessions" title="recorded sessions"></select></label>
-      <button id="replay" title="Play back the selected session (P)">Play back</button>
-      <button id="export" title="Download the selected session as JSON">Export</button>
-      <button id="delsession" title="Delete the selected session from this browser">Delete</button>
+    <div class="row" id="sessbtns" role="group" aria-label="Sessions">
+      <span class="lbl">Sessions</span>
+      <label class="sel"><span class="vh">Recorded sessions</span><select id="sessions" title="recorded practices"></select></label>
+      <button id="replay" title="Play back the selected practice (P)">Play back</button>
+      <button id="export" title="Download the selected practice as JSON">Export</button>
+      <button id="delsession" title="Delete the selected practice from this browser">Delete</button>
     </div>
     <div class="row" role="group" aria-label="Tools">
       <span class="lbl">Tools</span>
@@ -119,27 +210,19 @@
       <button id="clear" title="Clear the canvas">Clear</button>
       <button id="hide" title="Hide all controls (H)">Hide controls</button>
     </div>
-    <p class="fine"><span id="rates"></span><span id="privacy" title="Anonymous, cookieless usage counts (which views and modes get used). Brain, heart and session data never leave this browser. Opt out: Global Privacy Control / Do Not Track.">your signals stay on this device</span><span class="keys">keys · V view · J play · B breathe · N groove · M sound · R session · P playback · C calibrate · H hide</span></p>
+    <p class="fine"><span id="rates"></span><span id="privacy" title="Anonymous, cookieless usage counts (which steps and views get used). Brain, heart, camera and session data never leave this browser. Opt out: Global Privacy Control / Do Not Track.">your signals stay on this device</span><span class="keys">keys · V view · J play · B breathe · N groove · K camera · M sound · P playback · C recalibrate · H hide</span></p>
   </div>
-
 </div>
+</div>
+<button id="showdock" hidden aria-label="Show controls">controls</button>
+<div id="playhint" hidden role="status" aria-live="polite"></div>
+
+<!-- messages float here, never pushing anything under a finger -->
 <footer class="note">
   <span id="msg" aria-live="polite"></span>
   <span id="soundhint" hidden>tap anywhere for sound</span>
 </footer>
-</div>
-<button id="showdock" hidden aria-label="Show controls">controls</button>
 
-<div id="calov" hidden>
-  <div class="calbox">
-    <b id="calstep">STEP 1 OF 2 · EYES OPEN</b>
-    <p id="caltxt">Look softly at one point on the screen. Stay still, jaw relaxed.</p>
-    <div class="calbar"><i id="calfill"></i></div>
-    <p id="calleft" class="dim"></p>
-    <p class="dim small">Why: your brain's alpha rhythm rises when your eyes close. Measuring both states sets RELAX and FOCUS to <em>your</em> range. Blinks and movement pause the timer. With sound on, a tone marks each step.</p>
-    <button id="calcancel">Cancel (Esc)</button>
-  </div>
-</div>
 <div id="lab" hidden>
   <div class="labhead"><b>SIGNAL LAB</b><span class="dim">eyes-closed check: close your eyes 10s — the 8–12Hz bump and RELAX should rise</span></div>
   <canvas></canvas>
