@@ -8,7 +8,7 @@ What each signal is and how far to trust it: `docs/SIGNALS.md`. Design rule: **a
 
 | Input | Derived (src/dsp/pipeline.js, main.js) | Visual (INK: ink.js + arms.js) | Audio (synth.js) |
 |---|---|---|---|
-| **Readiness gate** (main.js) | `idle` no EEG for 1.5s · `contact` <3 sensors good/noisy · `uncalibrated` no calibration this source session (Enter reuses saved baseline) · `live` | before live: water still, arms dormant showing status lights only; every view frozen | band chord silent until live (fade τ1.5s); no thump |
+| **Readiness gate** (main.js) | `idle` no EEG for 1.5s · `contact` <3 sensors good/noisy · `uncalibrated` no calibration this source session (the baseline step offers the saved one) · `live` | before live: water still, arms dormant showing status lights only; every view frozen | band chord silent until live (fade τ1.5s); no thump |
 | **4 EEG sensors** TP9 / AF7 / AF8 / TP10 | per-channel band levels `ch[i]`, quality label + score, artifact `held[i]` | each sensor = an injector arm at its real head position (top-down, nose up); 5 band-coloured dye streams per site, amount ∝ ch[i][band] × quality score; none on no contact / railed / held | — |
 | Contact quality | good / noisy / no contact / railed / off | arm status light: green / amber / red slow blink / red / off; dock sensor map same colours | — |
 | **Bands** δ θ α β γ | smoothed rel. power 0..1 | dye colour δ violet, θ magenta, α cyan, β amber, γ white | binaural pair per band (L carrier, R carrier+beat): δ C3 +2Hz, θ G3 +6Hz, α C4 +10Hz, β E4 +18Hz, γ G4 +40Hz; gain 0.01+0.11·level^1.3 (τ1s); δ/θ octave layer for speakers |
@@ -18,7 +18,8 @@ What each signal is and how far to trust it: `docs/SIGNALS.md`. Design rule: **a
 | **Gyroscope** | yaw / pitch / roll rate | gentle body force: current follows head; roll → slow rotation (smoothed, capped) | — |
 | Head tilt (accel) | tilt x/y | SPRAY aim / PAINT emitter aim | — |
 | Blink / clench / motion artifact | events, 800ms refractory; holds (blink: forehead pair, clench/motion: all) | the held sensor's arm glitches (RGB-split ghosts, jitter, scanlines, stuttering light) and its ink pauses; motion glitches all arms; blink → small disturbance at forehead sites | band-passed noise burst |
-| Battery | % | dock | — |
+| Battery | % | corner chip | — |
+| **Camera** (optional, `src/input/camera.js` → `src/dsp/vision.js`, 64×48 @15fps, frames never kept or sent) | `camera.motion` 0..1 (frame difference above an adaptive noise floor), `x`/`y` −1..1 where the movement is (selfie-mirrored, y up), `vx`/`vy` its travel, `light` | INK: velocity-only stir at the movement's spot along its travel (no dye: ink still comes only from your brain) · SPRAY/PAINT: movement pulls the aim like a head tilt · ORBS: a sideways sweep spins the orbit. Gated by Live like everything else | "air": band-passed noise, gain 0.045·motion^1.3 (capped well under the chord), moving higher → brighter (400–2600 Hz) |
 
 **v0.6 additions (INK depth + PAINT impasto):**
 - Head tilt → INK window-camera parallax (eye slides ≤1.2R, pool plane pinned 1:1 so nozzles stay on their sites; frozen when not live).
@@ -52,18 +53,21 @@ Calibration cues: one soft tone at step 1→2, two rising tones at the end (audi
 - **ORBS** — five band orbs; swirl only on beat surges.
 - **PAINT** — the original feedback-particle painting; beat-stepped zoom; glitch synth (G) layers over it only.
 
-UI: one bottom-centre glass dock, three tiers:
-- **Bar**: source, ♥, battery, the current step, and ONE primary button for the next step (Connect Muse → Calibrate → Begin session → End session / Stop playback), with an optional secondary link (try the simulator, use saved baseline).
+## The guided journey (`src/journey/`) — the way in
+One path, one card at a time, over a still dark pool: **welcome** (length 3/5/10 min; Begin with Muse 2, or a simulated journey) → **connect** (put it on; Bluetooth picker; clear errors; no-Bluetooth browsers are told to use Chrome/Edge or the simulator) → **fit** (big sensor map; moves on by itself once 3 sensors hold contact for 2s) → **baseline** (eyes open, then eyes closed; or use the saved baseline; Back returns where you came from) → **ready** ("this is you") → **practice** → **reflect** (what changed: heart rate, calm, alpha, heart–breath sync) → **explore** (free play). `journey.js` is the pure stage logic (tested), `screens.js` only renders, main.js decides. On the simulator, the simulated person follows the steps (calmer with eyes closed, while breathing and resting; no blinks with eyes closed). Free-play shortcuts are off during the journey (only M and Esc). Corner (always): brand, source, ♥, battery, sound.
+
+## Free play: one bottom-centre glass dock, three tiers
+- **Bar**: the current status and one button that gets you back on track (Guided practice when Live, Measure baseline, Connect Muse).
 - **Readout**: sensor map, band key (Hz and meaning on hover), relax/focus (+ sync in BREATHE).
-- **Controls**: view segment (Ink/Spray/Orbs/Paint) · modes (Play/Breathe/Groove) · sound, snapshot, ⋯. The ⋯ drawer holds device (connect, recalibrate, SIM modes), sessions, tools (glitch, Signal Lab, clear, hide) and the key list.
+- **Controls**: view segment (Ink/Spray/Orbs/Paint) · modes (Play/Breathe/Groove) · camera, snapshot, ⋯. The ⋯ drawer holds device (connect, recalibrate, SIM modes), sessions, tools (glitch, Signal Lab, clear, hide) and the key list.
 - Messages float as a toast above the dock and fade after 7s (never shift buttons under a finger). Once live, 6s without input sinks the dock to near-invisible; any movement brings it back. Hide (H) leaves a faint "controls" pill to bring it back on touch screens.
-- Keyboard: V view · J play · B breathe · N groove · M sound · S snapshot · R session · P playback · C calibrate · Enter saved baseline · L lab · G glitch · H hide · Esc close/end. Sound starts on the first click/key.
+- Keyboard (free play): V view · J play · B breathe · N groove · K camera · M sound · S snapshot · P playback · C recalibrate · L lab · G glitch · H hide · Esc close/end. Sound starts on the first click/key.
 - PAINT (WebGPU, ~650 KB) loads only when first opened.
 
-## Guided sessions + playback (`src/session/`)
-- **Begin session (R)** (only when Live; length 1/3/5/10 min): eyes open 30s → eyes closed N min → eyes open 30s. A falling 5…1 countdown (one tone per second, G-A-C-D-E pentatonic descending) leads into eyes closed; a low bell marks it. In the last 5s of eyes closed, rising tones count 1…5, then a two-note chime means open your eyes. Banner top-centre (dims while eyes are closed); Esc ends early.
-- **Recording**: the derived `state` stream (bands, per-channel bands/quality/holds, relax, focus, heart, tilt/gyro, readiness, eyes-open/closed phase, alpha dB) at 20Hz + beat/blink events. No raw samples, no device IDs. Saved in this browser only (IndexedDB `hbi/sessions`, newest 8); **Export** downloads JSON on click; **Delete** removes the selected session.
-- **Summary** after a session: eyes-closed vs eyes-open relax, alpha dB difference, heart rate (live seconds only).
+## The practice + playback (`src/session/`)
+- **Practice** (from the ready card; only when Live; 3/5/10 min total): **arrive** 30s eyes open → **breathe** (BREATHE guide on, 5.5/min, cue word in the caption) → **rest** eyes closed → **return** 30s; breathe and rest split the rest equally. A soft bell starts breathe; a falling 5…1 countdown (G-A-C-D-E pentatonic) leads into rest; a low bell marks eyes closed; rising tones 1…5 and a two-note chime bring you back. Quiet caption low on screen (dims with eyes closed) with hints for lost contact or no pulse; Esc / End early stops (≥20s is still saved and reflected).
+- **Recording**: the derived `state` stream (bands, per-channel bands/quality/holds, relax, focus, heart, tilt/gyro, readiness, practice phase, alpha dB; phase names stored per session, older eyes-open/closed sessions still replay) at 20Hz + beat/blink events. No raw samples, no device IDs. Saved in this browser only (IndexedDB `hbi/sessions`, newest 8); **Export** downloads JSON on click; **Delete** removes the selected session.
+- **Reflect** after a practice: heart rate and calm arriving → resting, alpha dB eyes closed vs open, best heart–breath sync (live seconds only). "A mirror, not a score."
 - **Play back (P)**: the recording drives the current view and the sound exactly as live (beats, artifacts, arm lights); replay bar shows progress with open/closed markers. Esc/P stops.
 
 ## Modes (all need Live; each toggles independently)
@@ -79,6 +83,7 @@ three.js r187 WebGPURenderer + TSL (auto WebGL2 fallback): GPU compute particles
 2. **Hardware (code done, awaiting real-headband test — see docs/HARDWARE.md)** — chooser/timeout/cancel errors, auto-reconnect w/ backoff (5 tries) without reopening chooser, SIM keeps running until Muse streams, fallback to SIM on give-up, battery, device name in HUD (ble-integrator).
 3. **Signal quality (done)** — artifact rejection, per-channel quality.
 3c. **Heart + calm views (done — awaiting real-headband check)** — PPG on all 3 channels (was ambient-only), autocorrelation heart tracker + beat clock pacing everything, audible thump, SPRAY + ORBS views.
+3e. **Guided journey + input layer (done — awaiting real-headband check)** — one guided path (welcome → connect → fit → baseline → practice → reflect → free play), modular extra inputs (`src/input/features.js`) with the camera as the first.
 3d. **INK + binaural (done — awaiting real-headband check)** — readiness gate, fluid ink view with cyborg injector arms, binaural band chord on by default + mute, bottom dock, beat-only motion everywhere.
 3e. **Sessions + depth (done — awaiting real-headband check)** — guided open/closed session with countdown tones, recording + playback + export, INK colour/depth, PAINT impasto.
 3f. **Play + groove + breathe (done — awaiting real-headband check)** — PLAY mode (head stirs / scrubs), artifacts as instruments, heart-locked GROOVE, BREATHE with heart-rhythm sync and gold harmony.

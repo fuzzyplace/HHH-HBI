@@ -13,7 +13,7 @@ Deploy: push to `main` (Git-connected). Manual fallback: `vercel deploy --prod` 
 | Header | Why |
 |---|---|
 | Content-Security-Policy | only same-origin code; `'unsafe-eval'` is required by Hydra (glitch mode compiles shaders from code); no framing |
-| Permissions-Policy | Bluetooth for this origin only; camera/mic/location/USB/etc. off |
+| Permissions-Policy | Bluetooth and camera for this origin only (camera is opt-in, processed on the device, never sent); mic/location/USB/etc. off |
 | X-Frame-Options DENY + `frame-ancestors 'none'` | no clickjacking of the Connect/Bluetooth prompt |
 | HSTS, nosniff, Referrer-Policy, COOP | standard hardening |
 
@@ -26,6 +26,8 @@ Deploy: push to `main` (Git-connected). Manual fallback: `vercel deploy --prod` 
 | Event | Props | Answers |
 |---|---|---|
 | capability | webgl2, webgpu, bluetooth, mobile, lang | what hardware people bring |
+| journey | stage, path (muse, sim, none) | where people drop off in the guided journey |
+| camera | on, fail | is the camera input used / does permission work |
 | audio_start | muted | did sound start |
 | connect_attempt / connect_ok / connect_fail | reason (no_web_bluetooth, bt_off, cancelled, blocked, aborted, other) | Muse connect funnel |
 | calibrated | verdict, source | does calibration work |

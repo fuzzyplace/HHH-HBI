@@ -142,8 +142,9 @@ export class SprayView {
     this.focusS += (focus - this.focusS) * ke;
     const R = this.relaxS, F = this.focusS;
 
-    // head tilt aims the spray cone
-    const ax = (st.tilt?.x ?? 0) * 0.8, ay = (st.tilt?.y ?? 0) * 0.8;
+    // head tilt aims the spray cone; with the camera on, where you move pulls it too
+    const cm = st.camera?.on ? st.camera : null, cw = cm ? Math.min(1, cm.motion * 1.5) : 0;
+    const ax = (st.tilt?.x ?? 0) * 0.8 + (cm ? cm.x * cw : 0), ay = (st.tilt?.y ?? 0) * 0.8 + (cm ? cm.y * cw : 0);
     this.aimX = (this.aimX ?? 0) + (ax - (this.aimX ?? 0)) * Math.min(1, d * 4);
     this.aimY = (this.aimY ?? 0) + (ay - (this.aimY ?? 0)) * Math.min(1, d * 4);
 

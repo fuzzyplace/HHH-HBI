@@ -34,14 +34,14 @@ Connection uses **muse-js** (github.com/urish/muse-js, open source, Web Bluetoot
 - Flat or noisy signal: see contact dots below — fit and skin contact matter more than anything in software.
 
 ## Check it's working (dock)
-- Status reads `MUSE 2`; the step line walks connect → fit → calibrate → **Live**, and the bright button always shows the next step. The screen stays dark and still until Live — that's intended.
+- Press **Begin with Muse 2** and follow the cards: put it on → Connect → fit (moves on by itself at 3 green sensors) → baseline → **This is you**. The screen stays dark and still until then — that's intended. The corner chip reads `MUSE 2`.
 - Stream line (open ⋯): **EEG ≈256Hz · PPG ≈64Hz · IMU ≈17/s** (IMU counts packets). 0 = not streaming. `· artifact hold` appears for ~1s after a blink/clench/movement.
 - Sensor map TP9 / AF7 / AF8 / TP10: green good, amber noisy, red no contact or railed, magenta = artifact hold. The matching injector arm lights show the same.
 - Fix red/amber: wet forehead + behind-ear sensors slightly, move hair, sit still ~20s.
 - Use **headphones** for the binaural effect. Sound starts on your first click/key; M mutes.
 
 ## Test script (~10 min)
-Open DevTools console first. Run `hbiDiag()` after each block and paste the output back — it counts events since you connected (signal stats only, no device IDs).
+Rows 1–6 and 8–9g run in free play (finish the journey or use *Explore freely*). Open DevTools console first. Run `hbiDiag()` after each block and paste the output back — it counts events since you connected (signal stats only, no device IDs).
 
 | # | Do | Expect |
 |---|---|---|
@@ -51,19 +51,19 @@ Open DevTools console first. Run `hbiDiag()` after each block and paste the outp
 | 4 | Hold a clench 6s | 1 clench, then visuals resume after ~3–4s (sustained level becomes the new normal) |
 | 5 | Nod / turn head quickly ×3 | `artifact hold` flickers; no blink/clench storm |
 | 6 | Lift one ear sensor off for 10s, then reseat | that dot goes red/amber; at most 1 event; visuals keep moving on the other channels; recovers after reseat |
-| 7 | Click once (sound starts), press C: step 1 eyes open (look at one point), step 2 eyes closed until two rising tones | ~25s total; message reports eyes-closed alpha gain — **paste it to me** (≥3 dB = clear) |
+| 7 | In the journey's baseline step press Start: eyes open (look at one point), then eyes closed until two rising tones | ~30s; the ready card warns if the alpha rise was weak — **paste `hbiDiag().calibrationResult`** (≥3 dB = clear) |
 | 8 | Press L (Signal Lab). Eyes open 15s, then closed 15s | 8–12Hz bump rises and RELAX climbs with eyes closed; FOCUS drops |
 | 9 | Sit still 30s, audio on, headband snug on forehead | ♥ shows a number within ~10s (hover: lock % and channel); a thump per beat; the view surges in time — compare with your pulse at the wrist |
 | 9b | In INK (default), watch while live | each arm injects its own colours; lift one ear sensor → that arm goes red and its ink stops; blink → forehead arms glitch; nothing moves between heartbeats except drift |
 | 9c | Press V through SPRAY → ORBS → PAINT | dominant band dominates SPRAY/ORBS; motion only on heartbeats |
-| 9d | Once Live: pick 1 min, press R. Follow the tones (eyes closed after the 5…1 countdown, open at the chime) | summary shows relax higher and alpha + dB with eyes closed — **paste it to me**; P replays it with ink + sound |
+| 9d | From the ready card, begin the 3-minute practice and follow it (arrive, breathe with the cue, eyes closed after the 5…1 countdown, open at the chime) | the reflect card shows calm higher and alpha + dB while resting — **paste it to me**; Watch it back replays it |
 | 9e | Press J (PLAY), turn head left/right, nod, blink, clench | stylus arm follows your head (tell me if left/right or up/down is reversed); blink drops ink; clench ripples. In playback (P) head turn scrubs, nod pauses |
 | 9f | Press B, breathe with the arms for 2 min | SYNC climbs after ~30s if your pulse is locked; gold bloom when it holds — **paste `hbiDiag()`** |
 | 9g | Press N (GROOVE) with headphones | tempo follows your heart; kicks land on heartbeats; bands shape bass/hats/arps |
-| 10 | Reload page | dark until fit is OK; step offers Enter to reuse the saved baseline |
+| 10 | Reload page, begin again | after fit, the baseline step offers *Use my saved baseline* |
 | 11 | Tilt head left/right/up/down slowly | new paint appears toward where you tilt |
 
-Optional visual checks: tilt/nod → camera drift; S → PNG snapshot; G → glitch-synth mode.
+Optional visual checks: tilt/nod → camera drift; S → PNG snapshot; G → glitch-synth mode; K (camera, in free play) → wave a hand: the water stirs where you move and a soft air sound follows (Chrome asks for camera permission once).
 
 ## Debug URL flags
 - `?webgl` force WebGL2 backend · `?particles=65536` override count · `?debug=scene` raw particles, no feedback/post
